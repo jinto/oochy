@@ -19,6 +19,7 @@ const SEATBELT_PROFILE: &str = r#"
 (deny network*)
 "#;
 
+#[cfg(target_os = "macos")]
 extern "C" {
     fn sandbox_init(
         profile: *const libc::c_char,
@@ -29,21 +30,31 @@ extern "C" {
 }
 
 fn apply_seatbelt() -> std::result::Result<(), String> {
-    let profile_cstr = CString::new(SEATBELT_PROFILE).unwrap();
-    let mut errbuf: *mut libc::c_char = std::ptr::null_mut();
-    let ret = unsafe { sandbox_init(profile_cstr.as_ptr(), 0, &mut errbuf) };
-    if ret != 0 {
-        let msg = if !errbuf.is_null() {
-            let s = unsafe { std::ffi::CStr::from_ptr(errbuf) }
-                .to_string_lossy()
-                .to_string();
-            unsafe { sandbox_free_error(errbuf) };
-            s
-        } else {
-            format!("sandbox_init returned {ret}")
-        };
-        return Err(msg);
+    #[cfg(target_os = "macos")]
+    {
+        let profile_cstr = CString::new(SEATBELT_PROFILE).unwrap();
+        let mut errbuf: *mut libc::c_char = std::ptr::null_mut();
+        let ret = unsafe { sandbox_init(profile_cstr.as_ptr(), 0, &mut errbuf) };
+        if ret != 0 {
+            let msg = if !errbuf.is_null() {
+                let s = unsafe { std::ffi::CStr::from_ptr(errbuf) }
+                    .to_string_lossy()
+                    .to_string();
+                unsafe { sandbox_free_error(errbuf) };
+                s
+            } else {
+                format!("sandbox_init returned {ret}")
+            };
+            return Err(msg);
+        }
     }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On Linux, Seatbelt is not available. Landlock support is deferred to v2.
+        // The QuickJS VM + fork isolation still provides a security layer.
+    }
+
     Ok(())
 }
 
