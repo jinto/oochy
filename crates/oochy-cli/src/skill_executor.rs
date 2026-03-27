@@ -9,11 +9,13 @@ pub async fn execute_skill_calls(
     config: &oochy_core::config::Config,
 ) -> Result<Vec<SkillResult>> {
     let allowed_hosts = &config.sandbox.allowed_hosts;
-    let futures: Vec<_> = skill_calls
-        .iter()
-        .map(|call| execute_single_call(call, allowed_hosts))
-        .collect();
-    let results = futures::future::join_all(futures).await;
+    // Sequential execution: skill calls are ordered side-effects from JS.
+    // Parallel would break ordering guarantees (message order, read-after-write).
+    let mut results = Vec::new();
+    for call in skill_calls {
+        let result = execute_single_call(call, allowed_hosts).await;
+        results.push(result);
+    }
 
     Ok(results)
 }
@@ -139,6 +141,9 @@ fn validate_url(url_str: &str, allowed_hosts: &[String]) -> Result<()> {
             IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified(),
             IpAddr::V6(v6) => {
                 v6.is_loopback() || v6.is_unspecified() || v6.is_multicast()
+                    // ULA (fc00::/7) and link-local (fe80::/10)
+                    || (v6.segments()[0] & 0xfe00) == 0xfc00  // fc00::/7
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80  // fe80::/10
                     || matches!(v6.to_ipv4_mapped(), Some(v4) if v4.is_loopback() || v4.is_private() || v4.is_link_local())
             }
         };
@@ -161,7 +166,11 @@ fn validate_url(url_str: &str, allowed_hosts: &[String]) -> Result<()> {
 }
 
 async fn execute_http(call: &SkillCall, allowed_hosts: &[String]) -> Result<serde_json::Value> {
-    let client = reqwest::Client::new();
+    // Disable redirects to prevent redirect-based SSRF bypass
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| OochyError::Sandbox(format!("Http client build error: {e}")))?;
     let url = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
 
     if url.is_empty() {

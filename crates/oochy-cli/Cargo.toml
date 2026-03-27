@@ -22,5 +22,4 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", features = ["json"] }
 clap = { version = "4", features = ["derive"] }
 atty = "0.2"
-futures = "0.3"
 url = "2"

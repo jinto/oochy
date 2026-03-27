@@ -1422,7 +1422,6 @@ version = "0.1.0"
 dependencies = [
  "atty",
  "clap",
- "futures",
  "oochy-channels",
  "oochy-core",
  "oochy-llm",
