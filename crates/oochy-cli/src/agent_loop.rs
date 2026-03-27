@@ -1,6 +1,8 @@
+use oochy_core::capability::CapabilityChecker;
+use oochy_core::config::AgentConfig;
 use oochy_core::error::{OochyError, Result};
 use oochy_core::types::{
-    AgentState, ConversationTurn, Event, EventType, ExecutionResult, LlmMessage, Role,
+    AgentState, ConversationTurn, Event, EventType, ExecutionResult, LlmMessage, Role, SkillCall,
 };
 use oochy_llm::provider::LlmProvider;
 use oochy_sandbox::sandbox::Sandbox;
@@ -108,9 +110,11 @@ pub async fn run_agent_loop(
             // Execute captured skill calls on the host (real API calls)
             if !exec_result.skill_calls.is_empty() {
                 tracing::info!("Executing {} skill calls", exec_result.skill_calls.len());
+                let config = oochy_core::config::Config::load().unwrap_or_default();
+                let allowed_calls = filter_skill_calls(&exec_result.skill_calls, &config.agents, &agent_id);
                 let skill_results = crate::skill_executor::execute_skill_calls(
-                    &exec_result.skill_calls,
-                    &oochy_core::config::Config::load().unwrap_or_default(),
+                    &allowed_calls,
+                    &config,
                 )
                 .await;
                 if let Ok(results) = &skill_results {
@@ -260,6 +264,42 @@ fn agent_id_for_event(event: &Event) -> String {
             format!("web-{session}")
         }
     }
+}
+
+/// Filter skill calls through CapabilityChecker for the matching agent config.
+/// If no agent config is found (e.g. stdin mode), all calls pass through.
+fn filter_skill_calls(
+    calls: &[SkillCall],
+    agents: &[AgentConfig],
+    agent_id: &str,
+) -> Vec<SkillCall> {
+    // Find the agent config whose id matches or whose channels match the agent_id prefix
+    let agent_config = agents.iter().find(|a| {
+        a.id == agent_id
+            || agent_id.starts_with(&format!("telegram-"))
+                && a.channels.contains(&"telegram".to_string())
+            || agent_id.starts_with(&format!("discord-"))
+                && a.channels.contains(&"discord".to_string())
+            || agent_id.starts_with(&format!("web-"))
+                && a.channels.contains(&"web".to_string())
+    });
+
+    let Some(config) = agent_config else {
+        // No agent config found — allow all calls (stdin / default mode)
+        return calls.to_vec();
+    };
+
+    let mut checker = CapabilityChecker::from_agent_config(config);
+    let mut allowed = Vec::new();
+    for call in calls {
+        match checker.check(call) {
+            Ok(()) => allowed.push(call.clone()),
+            Err(e) => {
+                tracing::warn!("Capability check denied {}.{}: {}", call.skill_name, call.method, e);
+            }
+        }
+    }
+    allowed
 }
 
 fn chrono_now() -> String {

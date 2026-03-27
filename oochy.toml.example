@@ -1,0 +1,51 @@
+# Oochy configuration example
+# Copy to oochy.toml and fill in your values.
+# Sensitive values can be overridden via environment variables:
+#   OOCHY_API_KEY, OOCHY_LLM_PROVIDER, OOCHY_MODEL
+
+[llm]
+provider = "claude"
+api_key = ""          # or set OOCHY_API_KEY env var
+model = "claude-sonnet-4-20250514"
+max_tokens = 4096
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+allowed_paths = ["/tmp"]
+allowed_hosts = ["api.telegram.org", "discord.com"]
+
+# Channel definitions — one entry per integration
+[[channels]]
+channel_type = "web"
+bind_addr = "0.0.0.0:3000"
+
+[[channels]]
+channel_type = "telegram"
+token = "123456:ABC-your-bot-token"
+
+[[channels]]
+channel_type = "discord"
+token = "your-discord-bot-token"
+
+# Agent definitions — one entry per agent
+[[agents]]
+id = "assistant"
+name = "Assistant"
+system_prompt = "You are a helpful assistant."
+channels = ["web", "telegram"]   # which channels this agent handles
+
+  [[agents.allowed_skills]]
+  skill = "Telegram"
+  methods = ["sendMessage", "sendPhoto"]
+  rate_limit_per_minute = 30
+
+  [[agents.allowed_skills]]
+  skill = "Http"
+  methods = ["get"]
+  rate_limit_per_minute = 60
+
+  [[agents.allowed_skills]]
+  skill = "Storage"
+  # methods = []  means all methods are allowed
+  rate_limit_per_minute = 60

@@ -22,6 +22,28 @@ enum Commands {
         #[arg(long, default_value = "0.0.0.0:3000")]
         bind: String,
     },
+    /// Config management commands
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+    /// Agent management commands
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Load and validate oochy.toml, print summary
+    Check,
+}
+
+#[derive(Subcommand)]
+enum AgentCommands {
+    /// List configured agents with their skills
+    List,
 }
 
 #[tokio::main]
@@ -35,6 +57,12 @@ async fn main() {
     match cli.command {
         Some(Commands::Serve { bind }) => {
             run_serve(&bind).await;
+        }
+        Some(Commands::Config { command: ConfigCommands::Check }) => {
+            run_config_check();
+        }
+        Some(Commands::Agent { command: AgentCommands::List }) => {
+            run_agent_list();
         }
         None => {
             run_stdin().await;
@@ -134,6 +162,72 @@ async fn run_serve(bind_addr: &str) {
                 let _ = ws_channel
                     .send_to_session(&session_id, &format!("Error: {e}"))
                     .await;
+            }
+        }
+    }
+}
+
+fn run_config_check() {
+    match oochy_core::config::Config::load() {
+        Ok(config) => {
+            println!("Config OK");
+            println!("  LLM provider : {}", config.llm.provider);
+            println!("  LLM model    : {}", config.llm.model);
+            println!("  Max tokens   : {}", config.llm.max_tokens);
+            println!(
+                "  API key      : {}",
+                if config.llm.api_key.is_empty() { "NOT SET" } else { "set" }
+            );
+            println!("  Sandbox timeout : {}s", config.sandbox.timeout_secs);
+            println!("  Sandbox memory  : {}MB", config.sandbox.memory_limit_mb);
+            println!("  Channels : {}", config.channels.len());
+            for ch in &config.channels {
+                let addr = ch.bind_addr.as_deref().unwrap_or("-");
+                println!("    - {} (bind={}, token={})", ch.channel_type, addr,
+                    if ch.token.is_empty() { "not set" } else { "set" });
+            }
+            println!("  Agents   : {}", config.agents.len());
+            for agent in &config.agents {
+                println!("    - {} ({})", agent.name, agent.id);
+            }
+            if config.llm.api_key.is_empty() {
+                eprintln!("Warning: API key not set. Set OOCHY_API_KEY or llm.api_key in oochy.toml");
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("Config error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_agent_list() {
+    let config = oochy_core::config::Config::load().unwrap_or_else(|e| {
+        eprintln!("Config error: {e}");
+        std::process::exit(1);
+    });
+
+    if config.agents.is_empty() {
+        println!("No agents configured. Add [[agents]] sections to oochy.toml");
+        return;
+    }
+
+    for agent in &config.agents {
+        println!("Agent: {} (id={})", agent.name, agent.id);
+        println!("  System prompt: {}...", &agent.system_prompt.chars().take(60).collect::<String>());
+        println!("  Channels: {}", if agent.channels.is_empty() { "none".to_string() } else { agent.channels.join(", ") });
+        if agent.allowed_skills.is_empty() {
+            println!("  Skills: none");
+        } else {
+            println!("  Skills:");
+            for skill in &agent.allowed_skills {
+                let methods = if skill.methods.is_empty() {
+                    "all".to_string()
+                } else {
+                    skill.methods.join(", ")
+                };
+                println!("    - {} [{}] (rate: {}/min)", skill.skill, methods, skill.rate_limit_per_minute);
             }
         }
     }

@@ -9,6 +9,8 @@ pub struct Config {
     pub sandbox: SandboxConfig,
     #[serde(default)]
     pub agents: Vec<AgentConfig>,
+    #[serde(default)]
+    pub channels: Vec<ChannelConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,15 @@ fn default_timeout() -> u64 {
 
 fn default_memory_mb() -> u64 {
     64
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelConfig {
+    pub channel_type: String, // "telegram", "discord", "web"
+    #[serde(default)]
+    pub token: String,
+    #[serde(default)]
+    pub bind_addr: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +127,7 @@ impl Default for Config {
                 allowed_hosts: vec![],
             },
             agents: vec![],
+            channels: vec![],
         }
     }
 }
