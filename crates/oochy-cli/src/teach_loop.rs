@@ -143,6 +143,12 @@ pub fn approve_skill(result: &TeachResult) -> Result<()> {
             permissions,
             ..
         } => {
+            // Validate cron expression before saving
+            if let Some(ref cron_expr) = trigger.cron {
+                if let Err(e) = crate::schedule::validate_cron(cron_expr) {
+                    return Err(OochyError::Config(format!("Invalid schedule: {e}")));
+                }
+            }
             let now = now_iso8601();
             let skill = Skill {
                 name: skill_name.clone(),
@@ -236,10 +242,7 @@ fn detect_permissions(code: &str) -> Vec<String> {
 }
 
 fn now_iso8601() -> String {
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", duration.as_secs())
+    chrono::Utc::now().to_rfc3339()
 }
 
 #[cfg(test)]

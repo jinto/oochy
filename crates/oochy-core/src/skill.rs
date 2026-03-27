@@ -52,7 +52,9 @@ fn sanitize_name(name: &str) -> std::result::Result<String, OochyError> {
 pub fn skills_dir() -> PathBuf {
     let dir = PathBuf::from(".oochy/skills");
     if !dir.exists() {
-        let _ = std::fs::create_dir_all(&dir);
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!("Failed to create skills directory {}: {e}", dir.display());
+        }
     }
     dir
 }

@@ -338,9 +338,5 @@ fn filter_skill_calls(
 }
 
 fn chrono_now() -> String {
-    // Simple ISO-8601 timestamp without chrono dependency
-    let duration = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", duration.as_secs())
+    chrono::Utc::now().to_rfc3339()
 }

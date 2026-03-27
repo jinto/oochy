@@ -5,7 +5,6 @@ use rusqlite::{params, Connection};
 use std::str::FromStr;
 
 /// Validate a cron expression and enforce minimum 5-minute interval.
-#[allow(dead_code)]
 pub fn validate_cron(expr: &str) -> Result<(), String> {
     let schedule =
         CronSchedule::from_str(expr).map_err(|e| format!("Invalid cron expression: {e}"))?;

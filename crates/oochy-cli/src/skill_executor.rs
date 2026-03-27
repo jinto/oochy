@@ -4,7 +4,6 @@ use oochy_core::error::{OochyError, Result};
 use oochy_core::types::SkillCall;
 use rusqlite::{params, Connection};
 
-static LLM_CALL_COUNT: AtomicU32 = AtomicU32::new(0);
 const LLM_MAX_CALLS_PER_EXECUTION: u32 = 3;
 
 /// Execute captured skill calls on the host side (outside sandbox).
@@ -17,14 +16,14 @@ pub async fn execute_skill_calls(
 ) -> Result<Vec<SkillResult>> {
     let allowed_hosts = &config.sandbox.allowed_hosts;
     let db_path = std::env::var("OOCHY_DB_PATH").unwrap_or_else(|_| "oochy.db".into());
-    // Reset Llm recursion guard for this top-level execution
-    LLM_CALL_COUNT.store(0, Ordering::Relaxed);
+    // Per-execution LLM call counter (not global, avoids race between concurrent executions)
+    let llm_call_count = AtomicU32::new(0);
     // Sequential execution: skill calls are ordered side-effects from JS.
     // Parallel would break ordering guarantees (message order, read-after-write).
     let mut results = Vec::new();
     for call in skill_calls {
         let result =
-            execute_single_call(call, allowed_hosts, &db_path, config, skill_context).await;
+            execute_single_call(call, allowed_hosts, &db_path, config, skill_context, &llm_call_count).await;
         results.push(result);
     }
 
@@ -46,12 +45,13 @@ async fn execute_single_call(
     db_path: &str,
     config: &oochy_core::config::Config,
     skill_context: Option<&str>,
+    llm_call_count: &AtomicU32,
 ) -> SkillResult {
     let result = match call.skill_name.as_str() {
         "Telegram" => execute_telegram(call).await,
         "Http" => execute_http(call, allowed_hosts).await,
         "Storage" => execute_storage(call, db_path, skill_context),
-        "Llm" => execute_llm(call, config).await,
+        "Llm" => execute_llm(call, config, llm_call_count).await,
         _ => Err(OochyError::CapabilityDenied(format!(
             "Unknown skill: {}",
             call.skill_name
@@ -316,8 +316,9 @@ fn execute_storage(
 async fn execute_llm(
     call: &SkillCall,
     config: &oochy_core::config::Config,
+    llm_call_count: &AtomicU32,
 ) -> Result<serde_json::Value> {
-    let count = LLM_CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+    let count = llm_call_count.fetch_add(1, Ordering::Relaxed);
     if count >= LLM_MAX_CALLS_PER_EXECUTION {
         return Err(OochyError::Skill(
             "Llm recursion limit exceeded (max 3 calls per execution)".into(),
