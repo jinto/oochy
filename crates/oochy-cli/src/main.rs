@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 mod agent_loop;
 mod skill_executor;
 mod store;
+mod teach_loop;
 
 #[derive(Parser)]
 #[command(name = "oochy", version)]
@@ -159,14 +160,136 @@ async fn run_serve(bind_addr: &str) {
                         .and_then(|v| v.as_str())
                         .unwrap_or("default")
                         .to_string(),
-                    EventType::Discord => event
-                        .payload
-                        .get("channel_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("default")
-                        .to_string(),
                 };
                 let event_type = event.event_type.clone();
+
+                // Check for /teach command on Telegram
+                let is_teach = event.event_type == EventType::Telegram
+                    && event
+                        .payload
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .map(|t| t.starts_with("/teach"))
+                        .unwrap_or(false);
+
+                // Extract raw event text for skill matching
+                let raw_event_text = event
+                    .payload
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                if is_teach {
+                    let teach_text = raw_event_text.strip_prefix("/teach").unwrap_or("").trim();
+                    let chat_id_str = event
+                        .payload
+                        .get("chat_id")
+                        .map(|v| {
+                            v.as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| v.to_string())
+                        })
+                        .unwrap_or_default();
+
+                    if teach_text.is_empty() {
+                        send_telegram_message(&config, &chat_id_str, "Usage: /teach <description>\n\nExample: /teach send me a daily joke").await;
+                    } else {
+                        send_telegram_message(&config, &chat_id_str, &format!("Generating skill for: {teach_text}...")).await;
+                        match teach_loop::handle_teach(teach_text, &chat_id_str, &provider, &sandbox, &config).await {
+                            Ok(ref result @ teach_loop::TeachResult::Generated { ref code, ref dry_run_output, ref skill_name, .. }) => {
+                                match teach_loop::approve_skill(result) {
+                                    Ok(()) => {
+                                        let msg = format!(
+                                            "Skill '{skill_name}' generated and saved!\n\nCode:\n{code}\n\nDry-run output: {dry_run_output}"
+                                        );
+                                        send_telegram_message(&config, &chat_id_str, &msg).await;
+                                    }
+                                    Err(e) => {
+                                        send_telegram_message(&config, &chat_id_str, &format!("Failed to save skill: {e}")).await;
+                                    }
+                                }
+                            }
+                            Ok(teach_loop::TeachResult::Error(e)) => {
+                                send_telegram_message(&config, &chat_id_str, &format!("Teach failed: {e}")).await;
+                            }
+                            Err(e) => {
+                                send_telegram_message(&config, &chat_id_str, &format!("Error: {e}")).await;
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // Check taught skills before falling through to agent loop
+                let skills = oochy_core::skill::load_all_skills();
+                let matched_skill = match skills {
+                    Ok(ref skill_list) => skill_list.iter().find(|(skill, _js)| {
+                        skill.enabled && oochy_core::skill::match_trigger(skill, &raw_event_text)
+                    }),
+                    Err(ref e) => {
+                        tracing::warn!("Failed to load skills: {e}");
+                        None
+                    }
+                };
+
+                if let Some((_skill, js_code)) = matched_skill {
+                    let wrapped_code = format!("const ctx = JSON.parse(__context__);\n{}", js_code);
+                    let context = serde_json::json!({
+                        "event_type": format!("{:?}", event_type).to_lowercase(),
+                        "event_text": raw_event_text,
+                        "chat_id": session_id,
+                    });
+
+                    match sandbox.execute(&wrapped_code, context).await {
+                        Ok(exec_result) => {
+                            if !exec_result.skill_calls.is_empty() {
+                                let _ = crate::skill_executor::execute_skill_calls(&exec_result.skill_calls, &config).await;
+                            }
+                            let output = if exec_result.output.is_empty() {
+                                "(no output)".to_string()
+                            } else {
+                                exec_result.output.clone()
+                            };
+                            match event_type {
+                                EventType::WebChat => {
+                                    if let Err(e) = ws_channel.send_to_session(&session_id, &output).await {
+                                        tracing::warn!("Failed to send WebSocket response: {e}");
+                                    }
+                                }
+                                EventType::Telegram => {
+                                    send_telegram_message(&config, &session_id, &output).await;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Skill execution error for session {session_id}: {e}");
+                            match event_type {
+                                EventType::WebChat => {
+                                    let _ = ws_channel.send_to_session(&session_id, &format!("Error: {e}")).await;
+                                }
+                                EventType::Telegram => {
+                                    send_telegram_message(&config, &session_id, &format!("Skill error: {e}")).await;
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+
+                // No skill matched — check freeform fallback
+                if !config.freeform_fallback {
+                    let msg = "No matching skill found. Use /teach to create one.";
+                    match event_type {
+                        EventType::WebChat => {
+                            let _ = ws_channel.send_to_session(&session_id, msg).await;
+                        }
+                        EventType::Telegram => {
+                            send_telegram_message(&config, &session_id, msg).await;
+                        }
+                    }
+                    continue;
+                }
 
                 match agent_loop::run_agent_loop(event, &provider, &sandbox, &store, &config).await {
                     Ok(output) => {
@@ -177,7 +300,7 @@ async fn run_serve(bind_addr: &str) {
                                     tracing::warn!("Failed to send WebSocket response: {e}");
                                 }
                             }
-                            EventType::Telegram | EventType::Discord => {
+                            EventType::Telegram => {
                                 // Other channels handle their own responses via skill calls
                                 tracing::info!("Agent response for {session_id}: {output}");
                             }
@@ -192,6 +315,38 @@ async fn run_serve(bind_addr: &str) {
                 }
             }
         }
+    }
+}
+
+async fn send_telegram_message(config: &oochy_core::config::Config, chat_id: &str, text: &str) {
+    let bot_token = match std::env::var("OOCHY_TELEGRAM_TOKEN") {
+        Ok(t) => t,
+        Err(_) => {
+            // Try channel config
+            config
+                .channels
+                .iter()
+                .find(|c| c.channel_type == "telegram")
+                .map(|c| c.token.clone())
+                .unwrap_or_default()
+        }
+    };
+    if bot_token.is_empty() {
+        tracing::warn!("Cannot send Telegram message: no bot token configured");
+        return;
+    }
+    let url = format!("https://api.telegram.org/bot{bot_token}/sendMessage");
+    let client = reqwest::Client::new();
+    let res = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "chat_id": chat_id,
+            "text": text,
+        }))
+        .send()
+        .await;
+    if let Err(e) = res {
+        tracing::warn!("Failed to send Telegram message: {e}");
     }
 }
 

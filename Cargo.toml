@@ -6,7 +6,6 @@ members = [
     "crates/oochy-sandbox",
     "crates/oochy-cli",
     "crates/oochy-channels",
-    "crates/oochy-web",
 ]
 
 [workspace.package]

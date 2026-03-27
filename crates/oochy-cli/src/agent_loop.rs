@@ -32,8 +32,6 @@ const SYSTEM_PROMPT: &str = r#"You are Oochy, an AI agent that helps users by wr
 - Telegram.sendMessage(chatId, text) — Send a message via Telegram
 - Telegram.sendPhoto(chatId, url) — Send a photo
 - Telegram.editMessage(chatId, messageId, text) — Edit a message
-- Discord.sendMessage(channelId, text) — Send a Discord message
-- Discord.editMessage(channelId, messageId, text) — Edit a Discord message
 - Http.get(url) — HTTP GET request
 - Http.post(url, body) — HTTP POST request
 - Http.put(url, body) — HTTP PUT request
@@ -241,11 +239,6 @@ fn format_event(event: &Event) -> String {
             let session = payload.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
             format!("[WebChat] (session={session}): {text}")
         }
-        EventType::Discord => {
-            let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            let channel = payload.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
-            format!("[Discord] (channel={channel}): {text}")
-        }
     }
 }
 
@@ -270,10 +263,6 @@ fn agent_id_for_event(event: &Event) -> String {
                 .unwrap_or_else(|| "default".to_string());
             format!("telegram-{chat_id}")
         }
-        EventType::Discord => {
-            let channel = event.payload.get("channel_id").and_then(|v| v.as_str()).unwrap_or("default");
-            format!("discord-{channel}")
-        }
         EventType::WebChat => {
             let session = event.payload.get("session_id").and_then(|v| v.as_str()).unwrap_or("default");
             format!("web-{session}")
@@ -292,7 +281,6 @@ fn filter_skill_calls(
     let agent_config = agents.iter().find(|a| {
         a.id == agent_id
             || (agent_id.starts_with("telegram-") && a.channels.iter().any(|c| c == "telegram"))
-            || (agent_id.starts_with("discord-") && a.channels.iter().any(|c| c == "discord"))
             || (agent_id.starts_with("web-") && a.channels.iter().any(|c| c == "web"))
     });
 

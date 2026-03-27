@@ -11,6 +11,10 @@ pub struct Config {
     pub agents: Vec<AgentConfig>,
     #[serde(default)]
     pub channels: Vec<ChannelConfig>,
+    #[serde(default)]
+    pub admin_chat_ids: Vec<String>,
+    #[serde(default)]
+    pub freeform_fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +132,8 @@ impl Default for Config {
             },
             agents: vec![],
             channels: vec![],
+            admin_chat_ids: vec![],
+            freeform_fallback: false,
         }
     }
 }

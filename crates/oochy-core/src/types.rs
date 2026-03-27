@@ -57,7 +57,6 @@ pub struct Event {
 pub enum EventType {
     WebChat,
     Telegram,
-    Discord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,6 +11,9 @@ pub enum OochyError {
     #[error("Store error: {0}")]
     Store(String),
 
+    #[error("Skill error: {0}")]
+    Skill(String),
+
     #[error("Config error: {0}")]
     Config(String),
 

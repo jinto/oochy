@@ -43,9 +43,9 @@ fn apply_seatbelt() -> std::result::Result<(), String> {
 
 const KNOWN_SKILLS: &[(&str, &[&str])] = &[
     ("Telegram", &["sendMessage", "sendPhoto", "editMessage"]),
-    ("Discord", &["sendMessage", "editMessage"]),
     ("Http", &["get", "post", "put", "delete"]),
     ("Storage", &["get", "set", "delete", "list"]),
+    ("Llm", &["generate"]),
 ];
 
 /// Run QuickJS using AsyncRuntime + AsyncContext (avoids RefCell borrow conflicts).
