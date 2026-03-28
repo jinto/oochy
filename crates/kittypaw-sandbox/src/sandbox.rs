@@ -256,4 +256,26 @@ mod tests {
         assert!(!r.success);
         assert!(r.error.unwrap_or_default().contains("timed out"));
     }
+
+    #[test]
+    fn test_direct_file_and_env_stubs() {
+        let r = run_child_async(
+            r#"
+            const result = await File.write("test.txt", "hello");
+            const read = await File.read("test.txt");
+            const env = await Env.get("my_key");
+            return "stubs_work";
+            "#,
+            json!({}),
+            None,
+            None, // no resolver, stubs return "null" but shouldn't crash
+        );
+        assert!(r.success, "error: {:?}", r.error);
+        assert_eq!(r.output, "stubs_work");
+        assert_eq!(r.skill_calls.len(), 3);
+        assert_eq!(r.skill_calls[0].skill_name, "File");
+        assert_eq!(r.skill_calls[0].method, "write");
+        assert_eq!(r.skill_calls[1].method, "read");
+        assert_eq!(r.skill_calls[2].skill_name, "Env");
+    }
 }

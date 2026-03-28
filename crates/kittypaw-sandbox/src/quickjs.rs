@@ -10,10 +10,15 @@ use rquickjs::{async_with, AsyncContext, AsyncRuntime, Function, Object, Value};
 use crate::backend::SkillResolver;
 
 pub(crate) const KNOWN_SKILLS: &[(&str, &[&str])] = &[
-    ("Telegram", &["sendMessage", "sendPhoto", "editMessage"]),
+    (
+        "Telegram",
+        &["sendMessage", "sendPhoto", "editMessage", "sendDocument"],
+    ),
     ("Http", &["get", "post", "put", "delete"]),
     ("Storage", &["get", "set", "delete", "list"]),
     ("Llm", &["generate"]),
+    ("File", &["read", "write"]),
+    ("Env", &["get"]),
 ];
 
 /// Run QuickJS using AsyncRuntime + AsyncContext (avoids RefCell borrow conflicts).

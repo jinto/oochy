@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -14,6 +16,24 @@ pub async fn resolve_skill_call(
     config: &kittypaw_core::config::Config,
     store: &Arc<Mutex<Store>>,
 ) -> String {
+    // File calls are synchronous
+    if call.skill_name == "File" {
+        return match execute_file(call, None) {
+            Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| "null".to_string()),
+            Err(e) => serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
+                .unwrap_or_else(|_| "null".to_string()),
+        };
+    }
+
+    // Env calls are synchronous
+    if call.skill_name == "Env" {
+        return match execute_env(call, None) {
+            Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| "null".to_string()),
+            Err(e) => serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
+                .unwrap_or_else(|_| "null".to_string()),
+        };
+    }
+
     // Storage calls need synchronous Store access
     if call.skill_name == "Storage" {
         let s = store.lock().unwrap();
@@ -132,6 +152,8 @@ async fn execute_single_call(
         "Telegram" => execute_telegram(call).await,
         "Http" => execute_http(call, allowed_hosts).await,
         "Llm" => execute_llm(call, config, llm_call_count).await,
+        "File" => execute_file(call, None),
+        "Env" => execute_env(call, None),
         _ => Err(KittypawError::CapabilityDenied(format!(
             "Unknown skill: {}",
             call.skill_name
@@ -181,6 +203,32 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
                     "chat_id": chat_id,
                     "photo": photo_url,
                 }))
+                .send()
+                .await
+                .map_err(|e| KittypawError::Skill(format!("Telegram API error: {e}")))?;
+
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| KittypawError::Skill(format!("Telegram response parse error: {e}")))?;
+            Ok(body)
+        }
+        "sendDocument" => {
+            let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let file_url = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let caption = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
+
+            let url = format!("https://api.telegram.org/bot{bot_token}/sendDocument");
+            let mut payload = serde_json::json!({
+                "chat_id": chat_id,
+                "document": file_url,
+            });
+            if !caption.is_empty() {
+                payload["caption"] = serde_json::Value::String(caption.to_string());
+            }
+            let resp = client
+                .post(&url)
+                .json(&payload)
                 .send()
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Telegram API error: {e}")))?;
@@ -390,6 +438,100 @@ async fn execute_llm(
         .to_string();
 
     Ok(serde_json::json!({ "text": text }))
+}
+
+fn execute_file(call: &SkillCall, data_dir: Option<&Path>) -> Result<serde_json::Value> {
+    let data_dir = data_dir.ok_or_else(|| {
+        KittypawError::Sandbox("File operations require a package data directory".into())
+    })?;
+
+    // Create data dir if it doesn't exist
+    std::fs::create_dir_all(data_dir)?;
+
+    match call.method.as_str() {
+        "read" => {
+            let rel_path = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            if rel_path.is_empty() {
+                return Err(KittypawError::Sandbox("File.read: path is required".into()));
+            }
+            let full_path = validate_file_path(data_dir, rel_path)?;
+            let content = std::fs::read_to_string(&full_path)?;
+            Ok(serde_json::json!({ "content": content }))
+        }
+        "write" => {
+            let rel_path = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let content = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            if rel_path.is_empty() {
+                return Err(KittypawError::Sandbox(
+                    "File.write: path is required".into(),
+                ));
+            }
+            let full_path = validate_file_path(data_dir, rel_path)?;
+            // Max file size: 10MB
+            if content.len() > 10 * 1024 * 1024 {
+                return Err(KittypawError::Sandbox(
+                    "File.write: content exceeds 10MB limit".into(),
+                ));
+            }
+            // Create parent directories
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&full_path, content)?;
+            Ok(serde_json::json!({ "ok": true }))
+        }
+        _ => Err(KittypawError::Sandbox(format!(
+            "Unknown File method: {}",
+            call.method
+        ))),
+    }
+}
+
+/// Validate that a relative path stays within the data directory.
+/// Rejects ".." components and symlinks escaping the boundary.
+fn validate_file_path(data_dir: &Path, rel_path: &str) -> Result<PathBuf> {
+    if rel_path.contains("..") {
+        return Err(KittypawError::Sandbox(
+            "File: path traversal not allowed".into(),
+        ));
+    }
+    let rel = rel_path.trim_start_matches('/');
+    let full = data_dir.join(rel);
+    // For existing files, canonicalize and check prefix
+    if full.exists() {
+        let canonical = full.canonicalize()?;
+        let canonical_root = data_dir.canonicalize()?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(KittypawError::Sandbox(
+                "File: path escapes data directory".into(),
+            ));
+        }
+    }
+    Ok(full)
+}
+
+fn execute_env(
+    call: &SkillCall,
+    config_values: Option<&HashMap<String, String>>,
+) -> Result<serde_json::Value> {
+    match call.method.as_str() {
+        "get" => {
+            let key = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            if key.is_empty() {
+                return Err(KittypawError::Sandbox("Env.get: key is required".into()));
+            }
+            // Read from package config, NOT from real environment variables
+            let value = config_values.and_then(|m| m.get(key)).cloned();
+            match value {
+                Some(v) => Ok(serde_json::json!({ "value": v })),
+                None => Ok(serde_json::json!({ "value": null })),
+            }
+        }
+        _ => Err(KittypawError::Sandbox(format!(
+            "Unknown Env method: {}",
+            call.method
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -624,5 +766,75 @@ mod tests {
         let allowed = vec!["api.example.com".to_string()];
         assert!(validate_url("https://api.example.com/data", &allowed).is_ok());
         assert!(validate_url("https://evil.com/data", &allowed).is_err());
+    }
+
+    // File skill tests
+
+    fn make_file_call(method: &str, args: Vec<serde_json::Value>) -> SkillCall {
+        SkillCall {
+            skill_name: "File".to_string(),
+            method: method.to_string(),
+            args,
+        }
+    }
+
+    #[test]
+    fn test_file_write_and_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let call = make_file_call("write", vec![json_str("test.txt"), json_str("hello world")]);
+        let result = execute_file(&call, Some(dir.path())).unwrap();
+        assert_eq!(result, serde_json::json!({ "ok": true }));
+
+        let call = make_file_call("read", vec![json_str("test.txt")]);
+        let result = execute_file(&call, Some(dir.path())).unwrap();
+        assert_eq!(result, serde_json::json!({ "content": "hello world" }));
+    }
+
+    #[test]
+    fn test_file_path_traversal_blocked() {
+        let dir = tempfile::tempdir().unwrap();
+        let call = make_file_call("read", vec![json_str("../../../etc/passwd")]);
+        let result = execute_file(&call, Some(dir.path()));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("path traversal"), "error was: {err}");
+    }
+
+    #[test]
+    fn test_file_size_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let big_content = "x".repeat(11 * 1024 * 1024); // 11MB
+        let call = make_file_call("write", vec![json_str("big.txt"), json_str(&big_content)]);
+        let result = execute_file(&call, Some(dir.path()));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("10MB"), "error was: {err}");
+    }
+
+    // Env skill tests
+
+    fn make_env_call(method: &str, args: Vec<serde_json::Value>) -> SkillCall {
+        SkillCall {
+            skill_name: "Env".to_string(),
+            method: method.to_string(),
+            args,
+        }
+    }
+
+    #[test]
+    fn test_env_get_from_config() {
+        let mut config = HashMap::new();
+        config.insert("MY_KEY".to_string(), "my_value".to_string());
+        let call = make_env_call("get", vec![json_str("MY_KEY")]);
+        let result = execute_env(&call, Some(&config)).unwrap();
+        assert_eq!(result, serde_json::json!({ "value": "my_value" }));
+    }
+
+    #[test]
+    fn test_env_get_missing_key() {
+        let config = HashMap::new();
+        let call = make_env_call("get", vec![json_str("MISSING")]);
+        let result = execute_env(&call, Some(&config)).unwrap();
+        assert_eq!(result, serde_json::json!({ "value": null }));
     }
 }
