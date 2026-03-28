@@ -6,6 +6,7 @@ use kittypaw_workspace::WorkspaceManager;
 
 #[derive(Clone)]
 pub struct AppState {
+    #[allow(dead_code)]
     pub store: Arc<Mutex<Store>>,
     pub api_key: Arc<Mutex<String>>,
     #[allow(dead_code)]

@@ -63,9 +63,7 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
                                 let key = api_key.read().clone();
                                 // Skip masked keys
                                 if !key.starts_with("sk-...") {
-                                    if let Ok(store) = state.store.lock() {
-                                        let _ = store.storage_set("settings", "api_key", &key);
-                                    }
+                                    let _ = kittypaw_core::secrets::set_secret("settings", "api_key", &key);
                                     *state.api_key.lock().unwrap() = key;
                                 }
                                 saved.set(true);

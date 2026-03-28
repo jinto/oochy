@@ -5,6 +5,7 @@ pub mod metrics;
 pub mod package;
 pub mod package_manager;
 pub mod permission;
+pub mod secrets;
 pub mod skill;
 pub mod types;
 pub mod workspace;

@@ -24,8 +24,7 @@ fn main() {
     let store =
         Store::open(db_path.to_str().unwrap_or("kittypaw.db")).expect("Failed to open database");
 
-    let persisted_key = store
-        .storage_get("settings", "api_key")
+    let persisted_key = kittypaw_core::secrets::get_secret("settings", "api_key")
         .ok()
         .flatten()
         .unwrap_or_default();

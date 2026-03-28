@@ -127,6 +127,7 @@ impl PackageManager {
     }
 
     /// Get config values for a package.
+    /// Secret values stored as `<keychain>` are resolved from the OS keychain.
     pub fn get_config(&self, id: &str) -> Result<HashMap<String, String>> {
         let config_path = self.packages_dir.join(id).join("config.toml");
         if !config_path.exists() {
@@ -138,7 +139,14 @@ impl PackageManager {
         let mut map = HashMap::new();
         for (k, v) in table {
             if let toml::Value::String(s) = v {
-                map.insert(k, s);
+                if s == "<keychain>" {
+                    if let Some(secret) = crate::secrets::get_secret(&format!("packages/{id}"), &k)?
+                    {
+                        map.insert(k, secret);
+                    }
+                } else {
+                    map.insert(k, s);
+                }
             }
         }
         Ok(map)
@@ -161,19 +169,21 @@ impl PackageManager {
             toml::Table::new()
         };
 
-        // Secret fields get a `secret:` prefix marker
+        // Secret fields are stored in the OS keychain
         let pkg = self.load_package(id)?;
         let is_secret = pkg.config_schema.iter().any(|f| {
             f.key == key && matches!(f.field_type, crate::package::ConfigFieldType::Secret)
         });
 
-        let stored_value = if is_secret {
-            format!("secret:{value}")
+        if is_secret {
+            crate::secrets::set_secret(&format!("packages/{id}"), key, value)?;
+            table.insert(
+                key.to_string(),
+                toml::Value::String("<keychain>".to_string()),
+            );
         } else {
-            value.to_string()
-        };
-
-        table.insert(key.to_string(), toml::Value::String(stored_value));
+            table.insert(key.to_string(), toml::Value::String(value.to_string()));
+        }
 
         let content = toml::to_string_pretty(&table)
             .map_err(|e| KittypawError::Config(format!("Failed to serialize config: {e}")))?;
@@ -300,11 +310,25 @@ default = "us-east-1"
         mgr.set_config("test-pkg", "region", "eu-west-1").unwrap();
         let config = mgr.get_config("test-pkg").unwrap();
         assert_eq!(config.get("region").unwrap(), "eu-west-1");
+    }
 
-        // Set a secret value — gets `secret:` prefix
+    #[test]
+    #[ignore = "requires OS keychain access, may prompt for permission"]
+    fn test_set_secret_config() {
+        let (_packages_tmp, mgr, source_tmp) = setup();
+        mgr.install_package(source_tmp.path()).unwrap();
+
+        // Set a secret value — stored in keychain, config.toml gets `<keychain>` marker
         mgr.set_config("test-pkg", "api_key", "sk-123").unwrap();
+        let raw_config =
+            std::fs::read_to_string(mgr.packages_dir.join("test-pkg").join("config.toml")).unwrap();
+        assert!(
+            raw_config.contains("<keychain>"),
+            "Secret field should store <keychain> marker in config.toml"
+        );
+        // get_config resolves from keychain
         let config = mgr.get_config("test-pkg").unwrap();
-        assert_eq!(config.get("api_key").unwrap(), "secret:sk-123");
+        assert_eq!(config.get("api_key").unwrap(), "sk-123");
     }
 
     #[test]
