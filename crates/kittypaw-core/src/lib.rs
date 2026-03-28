@@ -2,6 +2,8 @@ pub mod capability;
 pub mod config;
 pub mod error;
 pub mod metrics;
+pub mod package;
+pub mod package_manager;
 pub mod permission;
 pub mod skill;
 pub mod types;

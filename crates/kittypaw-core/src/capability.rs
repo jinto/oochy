@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::config::AgentConfig;
 use crate::error::{KittypawError, Result};
+use crate::package::PackagePermissions;
 use crate::types::SkillCall;
 
 pub struct CapabilityChecker {
@@ -24,6 +25,23 @@ impl CapabilityChecker {
                 SkillPermissionEntry {
                     methods: perm.methods.clone(),
                     rate_limit_per_minute: perm.rate_limit_per_minute,
+                    call_timestamps: Vec::new(),
+                },
+            );
+        }
+        Self { allowed_skills }
+    }
+
+    /// Create a `CapabilityChecker` from package permissions.
+    /// All declared primitives are allowed with all methods, rate limit 60/min.
+    pub fn from_package_permissions(permissions: &PackagePermissions) -> Self {
+        let mut allowed_skills = HashMap::new();
+        for name in &permissions.primitives {
+            allowed_skills.insert(
+                name.clone(),
+                SkillPermissionEntry {
+                    methods: vec![], // empty = all methods allowed
+                    rate_limit_per_minute: 60,
                     call_timestamps: Vec::new(),
                 },
             );
@@ -251,6 +269,90 @@ mod tests {
             .check(&SkillCall {
                 skill_name: "Discord".into(),
                 method: "sendMessage".into(),
+                args: vec![]
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn test_from_package_permissions_allows_declared() {
+        let permissions = PackagePermissions {
+            primitives: vec!["Http".into(), "Telegram".into()],
+            allowed_hosts: vec![],
+        };
+        let mut checker = CapabilityChecker::from_package_permissions(&permissions);
+
+        // Declared primitives should be allowed with any method
+        assert!(checker
+            .check(&SkillCall {
+                skill_name: "Http".into(),
+                method: "get".into(),
+                args: vec![]
+            })
+            .is_ok());
+        assert!(checker
+            .check(&SkillCall {
+                skill_name: "Http".into(),
+                method: "post".into(),
+                args: vec![]
+            })
+            .is_ok());
+        assert!(checker
+            .check(&SkillCall {
+                skill_name: "Telegram".into(),
+                method: "sendMessage".into(),
+                args: vec![]
+            })
+            .is_ok());
+    }
+
+    #[test]
+    fn test_from_package_permissions_denies_undeclared() {
+        let permissions = PackagePermissions {
+            primitives: vec!["Http".into()],
+            allowed_hosts: vec![],
+        };
+        let mut checker = CapabilityChecker::from_package_permissions(&permissions);
+
+        assert!(checker
+            .check(&SkillCall {
+                skill_name: "Telegram".into(),
+                method: "sendMessage".into(),
+                args: vec![]
+            })
+            .is_err());
+        assert!(checker
+            .check(&SkillCall {
+                skill_name: "Storage".into(),
+                method: "get".into(),
+                args: vec![]
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn test_from_package_permissions_rate_limit() {
+        let permissions = PackagePermissions {
+            primitives: vec!["Http".into()],
+            allowed_hosts: vec![],
+        };
+        let mut checker = CapabilityChecker::from_package_permissions(&permissions);
+
+        // Should allow up to 60 calls/min
+        for _ in 0..60 {
+            assert!(checker
+                .check(&SkillCall {
+                    skill_name: "Http".into(),
+                    method: "get".into(),
+                    args: vec![]
+                })
+                .is_ok());
+        }
+        // 61st should fail
+        assert!(checker
+            .check(&SkillCall {
+                skill_name: "Http".into(),
+                method: "get".into(),
                 args: vec![]
             })
             .is_err());

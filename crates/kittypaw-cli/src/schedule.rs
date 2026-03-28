@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use cron::Schedule as CronSchedule;
+use kittypaw_core::package::SkillPackage;
 use kittypaw_core::skill::Skill;
 use rusqlite::{params, Connection};
 use std::str::FromStr;
@@ -23,6 +24,29 @@ pub fn validate_cron(expr: &str) -> Result<(), String> {
     }
     let _ = now;
     Ok(())
+}
+
+/// Check if a package is due to run based on its cron trigger.
+pub fn is_package_due(pkg: &SkillPackage, last_run: Option<DateTime<Utc>>) -> bool {
+    let trigger = match &pkg.trigger {
+        Some(t) if t.trigger_type == "schedule" => t,
+        _ => return false,
+    };
+    let cron_expr = match &trigger.cron {
+        Some(c) => c,
+        None => return false,
+    };
+    let schedule = match CronSchedule::from_str(cron_expr) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let reference = last_run.unwrap_or_else(|| Utc::now() - chrono::Duration::hours(24));
+    schedule
+        .after(&reference)
+        .take_while(|t| *t <= Utc::now())
+        .next()
+        .is_some()
 }
 
 /// Check if a skill is due to run based on its cron schedule.
@@ -213,12 +237,72 @@ pub async fn run_schedule_loop(
                 }
             }
         }
+
+        // --- Run scheduled packages ---
+        let packages_dir = std::path::PathBuf::from(".kittypaw/packages");
+        if let Ok(packages) = kittypaw_core::package_manager::load_all_packages(&packages_dir) {
+            let pkg_mgr = kittypaw_core::package_manager::PackageManager::new(packages_dir.clone());
+            for (pkg, js_code) in &packages {
+                let last_run = get_last_run(db_path, &pkg.meta.id);
+                if !is_package_due(pkg, last_run) {
+                    continue;
+                }
+
+                tracing::info!("Running scheduled package: {}", pkg.meta.id);
+                let config_values = pkg_mgr
+                    .get_config_with_defaults(&pkg.meta.id)
+                    .unwrap_or_default();
+                let event_payload = serde_json::json!({
+                    "event_type": "schedule",
+                });
+                let context = pkg.build_context(&config_values, event_payload);
+                let wrapped = format!("const ctx = JSON.parse(__context__);\n{js_code}");
+                match sandbox.execute(&wrapped, context).await {
+                    Ok(result) if result.success => {
+                        if !result.skill_calls.is_empty() {
+                            let preresolved = crate::skill_executor::resolve_storage_calls(
+                                &result.skill_calls,
+                                &store,
+                                Some(&pkg.meta.id),
+                            );
+                            let _ = crate::skill_executor::execute_skill_calls(
+                                &result.skill_calls,
+                                config,
+                                preresolved,
+                                Some(&pkg.meta.id),
+                            )
+                            .await;
+                        }
+                        tracing::info!(
+                            "Scheduled package '{}' completed: {}",
+                            pkg.meta.id,
+                            result.output
+                        );
+                        set_last_run(db_path, &pkg.meta.id, Utc::now()).ok();
+                        reset_failure_count(db_path, &pkg.meta.id).ok();
+                    }
+                    Ok(result) => {
+                        tracing::warn!(
+                            "Scheduled package '{}' failed: {:?}",
+                            pkg.meta.id,
+                            result.error
+                        );
+                        increment_failure_count(db_path, &pkg.meta.id).ok();
+                    }
+                    Err(e) => {
+                        tracing::error!("Scheduled package '{}' execution error: {e}", pkg.meta.id);
+                        increment_failure_count(db_path, &pkg.meta.id).ok();
+                    }
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kittypaw_core::package::{PackageMeta, PackagePermissions as PkgPerms};
     use kittypaw_core::skill::{Skill, SkillPermissions, SkillTrigger};
 
     fn make_schedule_skill(cron_expr: &str) -> Skill {
@@ -336,5 +420,56 @@ mod tests {
         assert_eq!(get_failure_count(db_path, "my-skill"), 0);
 
         let _ = std::fs::remove_file(&p);
+    }
+
+    fn make_schedule_package(cron_expr: &str) -> SkillPackage {
+        SkillPackage {
+            meta: PackageMeta {
+                id: "test-pkg".into(),
+                name: "Test Package".into(),
+                version: "1.0.0".into(),
+                description: "A test package".into(),
+                author: "tester".into(),
+                category: "test".into(),
+                tags: vec![],
+            },
+            config_schema: vec![],
+            permissions: PkgPerms {
+                primitives: vec![],
+                allowed_hosts: vec![],
+            },
+            trigger: Some(SkillTrigger {
+                trigger_type: "schedule".into(),
+                cron: Some(cron_expr.into()),
+                natural: None,
+                keyword: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn test_is_package_due_basic() {
+        let pkg = make_schedule_package("0 0 * * * *"); // every hour
+        let two_hours_ago = Utc::now() - chrono::Duration::hours(2);
+        assert!(is_package_due(&pkg, Some(two_hours_ago)));
+
+        let just_now = Utc::now() - chrono::Duration::seconds(30);
+        assert!(!is_package_due(&pkg, Some(just_now)));
+    }
+
+    #[test]
+    fn test_is_package_due_no_trigger() {
+        let mut pkg = make_schedule_package("0 0 * * * *");
+        pkg.trigger = None;
+        let two_hours_ago = Utc::now() - chrono::Duration::hours(2);
+        assert!(!is_package_due(&pkg, Some(two_hours_ago)));
+    }
+
+    #[test]
+    fn test_is_package_due_message_trigger() {
+        let mut pkg = make_schedule_package("0 0 * * * *");
+        pkg.trigger.as_mut().unwrap().trigger_type = "message".into();
+        let two_hours_ago = Utc::now() - chrono::Duration::hours(2);
+        assert!(!is_package_due(&pkg, Some(two_hours_ago)));
     }
 }
