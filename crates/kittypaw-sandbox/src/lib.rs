@@ -5,7 +5,7 @@ pub mod quickjs;
 pub mod sandbox;
 pub mod threaded;
 
-pub use backend::{SandboxBackend, SandboxExecConfig};
+pub use backend::{SandboxBackend, SandboxExecConfig, SkillResolver};
 #[cfg(unix)]
 pub use forked::ForkedSandbox;
 pub use sandbox::Sandbox;

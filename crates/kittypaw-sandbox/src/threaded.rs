@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use kittypaw_core::error::Result;
 use kittypaw_core::types::ExecutionResult;
 
-use crate::backend::{SandboxBackend, SandboxExecConfig};
+use crate::backend::{SandboxBackend, SandboxExecConfig, SkillResolver};
 use crate::quickjs::run_child_async;
 
 /// Thread-based sandbox for all platforms (no fork, no OS isolation).
@@ -28,7 +28,11 @@ impl ThreadSandbox {
 
 #[async_trait]
 impl SandboxBackend for ThreadSandbox {
-    async fn execute(&self, config: SandboxExecConfig) -> Result<ExecutionResult> {
+    async fn execute(
+        &self,
+        config: SandboxExecConfig,
+        skill_resolver: Option<SkillResolver>,
+    ) -> Result<ExecutionResult> {
         let code = config.code.clone();
         let context: serde_json::Value = serde_json::from_str(&config.context_json)
             .unwrap_or(serde_json::Value::Object(Default::default()));
@@ -39,7 +43,9 @@ impl SandboxBackend for ThreadSandbox {
 
         let result = tokio::time::timeout(
             outer_timeout,
-            tokio::task::spawn_blocking(move || run_child_async(&code, context, Some(js_timeout))),
+            tokio::task::spawn_blocking(move || {
+                run_child_async(&code, context, Some(js_timeout), skill_resolver)
+            }),
         )
         .await;
 

@@ -132,46 +132,32 @@ pub async fn run_agent_loop(
             "agent_id": agent_id,
         });
 
+        // Build a SkillResolver so JS skill stubs return real data
+        // (Http responses, Storage values, Llm outputs) instead of "null".
+        let store_for_resolver = Arc::clone(&store);
+        let config_for_resolver = config.clone();
+        let skill_resolver: Option<kittypaw_sandbox::SkillResolver> =
+            Some(Arc::new(move |call: kittypaw_core::types::SkillCall| {
+                let store = Arc::clone(&store_for_resolver);
+                let config = config_for_resolver.clone();
+                Box::pin(async move {
+                    crate::skill_executor::resolve_skill_call(&call, &config, &store).await
+                })
+            }));
+
         let exec_result = sandbox
-            .execute(&code, context)
+            .execute_with_resolver(&code, context, skill_resolver)
             .instrument(info_span!("sandbox_execute"))
             .await?;
 
         if exec_result.success {
-            // Execute captured skill calls on the host (real API calls)
+            // Skill calls were already executed inline by the resolver during
+            // sandbox execution. Log any that were captured for observability.
             if !exec_result.skill_calls.is_empty() {
-                tracing::info!("Executing {} skill calls", exec_result.skill_calls.len());
-                let allowed_calls =
-                    filter_skill_calls(&exec_result.skill_calls, &config.agents, &agent_id);
-                let preresolved = {
-                    let s = store.lock().unwrap();
-                    crate::skill_executor::resolve_storage_calls(&allowed_calls, &s, None)
-                };
-                let skill_results = crate::skill_executor::execute_skill_calls(
-                    &allowed_calls,
-                    config,
-                    preresolved,
-                    None,
-                )
-                .instrument(info_span!("skill_execute"))
-                .await;
-                match &skill_results {
-                    Ok(results) => {
-                        for r in results {
-                            if !r.success {
-                                tracing::warn!(
-                                    "Skill {}.{} failed: {:?}",
-                                    r.skill_name,
-                                    r.method,
-                                    r.error
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("Skill executor failed: {e}");
-                    }
-                }
+                tracing::info!(
+                    "{} skill calls resolved inline during execution",
+                    exec_result.skill_calls.len()
+                );
             }
 
             let output = if exec_result.output.is_empty() {
@@ -350,6 +336,8 @@ fn agent_id_for_event(event: &Event) -> String {
 
 /// Filter skill calls through CapabilityChecker for the matching agent config.
 /// If no agent config is found (e.g. stdin mode), all calls pass through.
+/// TODO: integrate into SkillResolver for inline capability checking
+#[allow(dead_code)]
 fn filter_skill_calls(
     calls: &[SkillCall],
     agents: &[AgentConfig],

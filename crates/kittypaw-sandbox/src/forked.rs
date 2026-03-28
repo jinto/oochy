@@ -13,6 +13,8 @@ use crate::backend::SandboxBackend;
 #[cfg(unix)]
 use crate::backend::SandboxExecConfig;
 #[cfg(unix)]
+use crate::backend::SkillResolver;
+#[cfg(unix)]
 use crate::quickjs::run_child_async;
 
 #[cfg(unix)]
@@ -126,7 +128,7 @@ fn run_child(write_fd: libc::c_int, code: &str, context: serde_json::Value, time
     unsafe { libc::alarm(timeout_secs as u32) };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_child_async(code, context, None)
+        run_child_async(code, context, None, None)
     }))
     .unwrap_or_else(|_| ExecutionResult {
         success: false,
@@ -165,7 +167,11 @@ impl ForkedSandbox {
 #[cfg(unix)]
 #[async_trait]
 impl SandboxBackend for ForkedSandbox {
-    async fn execute(&self, config: SandboxExecConfig) -> Result<ExecutionResult> {
+    async fn execute(
+        &self,
+        config: SandboxExecConfig,
+        _skill_resolver: Option<SkillResolver>,
+    ) -> Result<ExecutionResult> {
         let mut fds = [0i32; 2];
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(kittypaw_core::error::KittypawError::Sandbox(format!(

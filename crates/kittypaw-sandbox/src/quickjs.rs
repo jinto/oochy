@@ -7,6 +7,8 @@ use rquickjs::function::Rest;
 use rquickjs::prelude::Async;
 use rquickjs::{async_with, AsyncContext, AsyncRuntime, Function, Object, Value};
 
+use crate::backend::SkillResolver;
+
 pub(crate) const KNOWN_SKILLS: &[(&str, &[&str])] = &[
     ("Telegram", &["sendMessage", "sendPhoto", "editMessage"]),
     ("Http", &["get", "post", "put", "delete"]),
@@ -24,6 +26,7 @@ pub(crate) fn run_child_async(
     code: &str,
     context: serde_json::Value,
     timeout: Option<Duration>,
+    skill_resolver: Option<SkillResolver>,
 ) -> ExecutionResult {
     let code = code.to_string();
     let calls: Arc<Mutex<Vec<SkillCall>>> = Arc::new(Mutex::new(Vec::new()));
@@ -58,6 +61,9 @@ pub(crate) fn run_child_async(
 
             let qctx = AsyncContext::full(&qrt).await.expect("create AsyncContext");
 
+            // Clone resolver so it can be moved into the async_with! block
+            let resolver = skill_resolver;
+
             // Everything inside one async_with! block — proven pattern from spike 0.1
             let result = async_with!(qctx => |ctx| {
                 let globals = ctx.globals();
@@ -69,18 +75,26 @@ pub(crate) fn run_child_async(
                         let skill = skill_name.to_string();
                         let meth = method.to_string();
                         let cc = Arc::clone(&calls_clone);
+                        let resolver = resolver.clone();
                         let func = Function::new(
                             ctx.clone(),
                             Async(move |args: Rest<String>| {
                                 let skill = skill.clone();
                                 let meth = meth.clone();
                                 let cc = Arc::clone(&cc);
+                                let resolver = resolver.clone();
                                 async move {
                                     let json_args: Vec<serde_json::Value> = args.0.iter()
                                         .map(|s| serde_json::from_str(s).unwrap_or(serde_json::Value::String(s.clone())))
                                         .collect();
-                                    cc.lock().unwrap().push(SkillCall { skill_name: skill, method: meth, args: json_args });
-                                    "null".to_string()
+                                    let call = SkillCall { skill_name: skill, method: meth, args: json_args };
+                                    cc.lock().unwrap().push(call.clone());
+
+                                    if let Some(ref resolve) = resolver {
+                                        resolve(call).await
+                                    } else {
+                                        "null".to_string()
+                                    }
                                 }
                             }),
                         ).unwrap();

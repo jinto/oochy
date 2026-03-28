@@ -2,7 +2,7 @@ use kittypaw_core::config::SandboxConfig;
 use kittypaw_core::error::Result;
 use kittypaw_core::types::ExecutionResult;
 
-use crate::backend::{SandboxBackend, SandboxExecConfig};
+use crate::backend::{SandboxBackend, SandboxExecConfig, SkillResolver};
 #[cfg(unix)]
 use crate::forked::ForkedSandbox;
 use crate::threaded::ThreadSandbox;
@@ -38,13 +38,22 @@ impl Sandbox {
     }
 
     pub async fn execute(&self, code: &str, context: serde_json::Value) -> Result<ExecutionResult> {
+        self.execute_with_resolver(code, context, None).await
+    }
+
+    pub async fn execute_with_resolver(
+        &self,
+        code: &str,
+        context: serde_json::Value,
+        skill_resolver: Option<SkillResolver>,
+    ) -> Result<ExecutionResult> {
         let exec_config = SandboxExecConfig {
             code: code.to_string(),
             context_json: context.to_string(),
             timeout_ms: self.config.timeout_secs * 1000,
             max_memory_bytes: (self.config.memory_limit_mb as usize) * 1024 * 1024,
         };
-        self.backend.execute(exec_config).await
+        self.backend.execute(exec_config, skill_resolver).await
     }
 }
 
@@ -53,6 +62,7 @@ mod tests {
     use super::*;
     use kittypaw_core::config::SandboxConfig;
     use serde_json::json;
+    use std::sync::Arc;
 
     use crate::quickjs::run_child_async;
 
@@ -76,7 +86,7 @@ mod tests {
 
     #[test]
     fn test_direct_simple() {
-        let r = run_child_async("return 'hello';", json!({}), None);
+        let r = run_child_async("return 'hello';", json!({}), None, None);
         assert!(r.success, "error: {:?}", r.error);
         assert_eq!(r.output, "hello");
     }
@@ -86,6 +96,7 @@ mod tests {
         let r = run_child_async(
             r#"await Telegram.sendMessage("chat123", "Hi"); return "done";"#,
             json!({}),
+            None,
             None,
         );
         assert!(r.success, "error: {:?}", r.error);
@@ -97,9 +108,44 @@ mod tests {
 
     #[test]
     fn test_direct_syntax_error() {
-        let r = run_child_async("this is not valid !!!", json!({}), None);
+        let r = run_child_async("this is not valid !!!", json!({}), None, None);
         assert!(!r.success);
         assert!(r.error.is_some());
+    }
+
+    #[test]
+    fn test_direct_skill_resolver() {
+        use kittypaw_core::types::SkillCall;
+        use std::future::Future;
+        use std::pin::Pin;
+
+        let resolver: SkillResolver = Arc::new(
+            |call: SkillCall| -> Pin<Box<dyn Future<Output = String> + Send>> {
+                Box::pin(async move {
+                    if call.skill_name == "Http" && call.method == "get" {
+                        r#"{"status": "ok", "data": [1,2,3]}"#.to_string()
+                    } else if call.skill_name == "Storage" && call.method == "get" {
+                        "stored_value".to_string()
+                    } else {
+                        "null".to_string()
+                    }
+                })
+            },
+        );
+
+        let r = run_child_async(
+            r#"
+            const resp = await Http.get("https://example.com/api");
+            return resp;
+            "#,
+            json!({}),
+            None,
+            Some(resolver),
+        );
+        assert!(r.success, "error: {:?}", r.error);
+        assert_eq!(r.output, r#"{"status": "ok", "data": [1,2,3]}"#);
+        assert_eq!(r.skill_calls.len(), 1);
+        assert_eq!(r.skill_calls[0].skill_name, "Http");
     }
 
     #[tokio::test]

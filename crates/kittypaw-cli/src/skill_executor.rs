@@ -1,10 +1,46 @@
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use kittypaw_core::error::{KittypawError, Result};
 use kittypaw_core::types::SkillCall;
 use kittypaw_store::Store;
 
 const LLM_MAX_CALLS_PER_EXECUTION: u32 = 3;
+
+/// Execute a single skill call inline (for use as a SkillResolver callback).
+/// Returns a string result that flows back to JS during sandbox execution.
+pub async fn resolve_skill_call(
+    call: &SkillCall,
+    config: &kittypaw_core::config::Config,
+    store: &Arc<Mutex<Store>>,
+) -> String {
+    // Storage calls need synchronous Store access
+    if call.skill_name == "Storage" {
+        let s = store.lock().unwrap();
+        return match execute_storage(call, &s, None) {
+            Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| "null".to_string()),
+            Err(e) => serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
+                .unwrap_or_else(|_| "null".to_string()),
+        };
+    }
+
+    let llm_call_count = AtomicU32::new(0);
+    let result = execute_single_call(
+        call,
+        &config.sandbox.allowed_hosts,
+        config,
+        None,
+        &llm_call_count,
+    )
+    .await;
+
+    if result.success {
+        serde_json::to_string(&result.result).unwrap_or_else(|_| "null".to_string())
+    } else {
+        serde_json::to_string(&serde_json::json!({"error": result.error}))
+            .unwrap_or_else(|_| "null".to_string())
+    }
+}
 
 /// Resolve storage skill calls synchronously using the store.
 /// Returns a parallel Vec of Option<SkillResult> — Some for Storage calls, None for others.
