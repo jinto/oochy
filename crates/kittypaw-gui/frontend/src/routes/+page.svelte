@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { chatStore, isStreaming } from '$lib/stores/chat';
 	import { pendingChanges, selectedFile } from '$lib/stores/workspace';
 	import { sendMessage, onStreamToken, getSettings } from '$lib/tauri';
@@ -15,7 +15,6 @@
 	let needsApiKey = false;
 	let messagesEl: HTMLElement;
 	let streamingId: string | null = null;
-	let unlistenStream: (() => void) | null = null;
 
 	// Active panel: 'chat' | 'preview' | 'changes' | 'skills'
 	let activePanel: 'chat' | 'preview' | 'changes' | 'skills' = 'chat';
@@ -41,16 +40,18 @@
 			// tauri not available in browser preview
 		}
 
-		unlistenStream = await onStreamToken((token) => {
-			if (streamingId) {
-				chatStore.appendToMessage(streamingId, token);
-				scrollToBottom();
-			}
-		});
-	});
-
-	onDestroy(() => {
-		unlistenStream?.();
+		try {
+			const unlisten = await onStreamToken((token) => {
+				if (streamingId) {
+					chatStore.appendToMessage(streamingId, token);
+					scrollToBottom();
+				}
+			});
+			// Clean up on page unload since Svelte 5 onMount doesn't support async cleanup
+			window.addEventListener('beforeunload', () => unlisten());
+		} catch (e) {
+			// onStreamToken not available outside Tauri
+		}
 	});
 
 	async function scrollToBottom() {

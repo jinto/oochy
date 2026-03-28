@@ -1,19 +1,22 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 	import { pendingPermissionRequest } from '$lib/stores/permission';
 	import { onPermissionRequest, respondPermissionRequest } from '$lib/tauri';
 
-	let unsubscribe: (() => void) | null = null;
+	onMount(() => {
+		let unlisten: (() => void) | null = null;
 
-	onMount(async () => {
-		const unlisten = await onPermissionRequest((req) => {
+		onPermissionRequest((req) => {
 			pendingPermissionRequest.set(req);
+		}).then((fn) => {
+			unlisten = fn;
+		}).catch(() => {
+			// onPermissionRequest not available outside Tauri
 		});
-		unsubscribe = unlisten;
-	});
 
-	onDestroy(() => {
-		if (unsubscribe) unsubscribe();
+		return () => {
+			unlisten?.();
+		};
 	});
 
 	async function respond(decision: 'allow_once' | 'allow_permanent' | 'deny') {
