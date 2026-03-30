@@ -11,9 +11,12 @@ tracing = { workspace = true }
 toml = "0.8"
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 rusqlite = { version = "0.32", optional = true }
+reqwest = { version = "0.12", features = ["json"], optional = true }
+tokio = { workspace = true, optional = true }
 
 [features]
 rusqlite = ["dep:rusqlite"]
+registry = ["dep:reqwest", "dep:tokio"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -31,9 +31,20 @@ pub enum KittypawError {
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    #[cfg(feature = "registry")]
+    #[error("Network error: {0}")]
+    Network(String),
 }
 
 pub type Result<T> = std::result::Result<T, KittypawError>;
+
+#[cfg(feature = "registry")]
+impl From<reqwest::Error> for KittypawError {
+    fn from(e: reqwest::Error) -> Self {
+        KittypawError::Network(e.to_string())
+    }
+}
 
 #[cfg(feature = "rusqlite")]
 impl From<rusqlite::Error> for KittypawError {

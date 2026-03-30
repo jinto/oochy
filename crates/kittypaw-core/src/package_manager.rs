@@ -204,6 +204,18 @@ impl PackageManager {
         Ok(chain)
     }
 
+    #[cfg(feature = "registry")]
+    pub async fn install_from_registry(
+        &self,
+        client: &crate::registry::RegistryClient,
+        entry: &crate::registry::RegistryEntry,
+    ) -> Result<SkillPackage> {
+        let temp_dir = client.download_package(entry).await?;
+        let result = self.install_package(&temp_dir);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        result
+    }
+
     /// Get all config values, merging defaults from schema.
     pub fn get_config_with_defaults(&self, id: &str) -> Result<HashMap<String, String>> {
         let pkg = self.load_package(id)?;

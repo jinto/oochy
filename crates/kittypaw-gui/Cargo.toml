@@ -8,7 +8,7 @@ name = "kittypaw-gui"
 path = "src/main.rs"
 
 [dependencies]
-kittypaw-core = { path = "../kittypaw-core" }
+kittypaw-core = { path = "../kittypaw-core", features = ["registry"] }
 kittypaw-llm = { path = "../kittypaw-llm" }
 kittypaw-store = { path = "../kittypaw-store" }
 kittypaw-sandbox = { path = "../kittypaw-sandbox" }

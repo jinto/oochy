@@ -5,6 +5,8 @@ pub mod metrics;
 pub mod package;
 pub mod package_manager;
 pub mod permission;
+#[cfg(feature = "registry")]
+pub mod registry;
 pub mod secrets;
 pub mod skill;
 pub mod types;
