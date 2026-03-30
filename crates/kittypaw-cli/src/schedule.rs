@@ -209,7 +209,14 @@ fn handle_execution_failure(
             );
             let _ = kittypaw_core::skill::disable_skill(id);
         } else {
-            tracing::warn!("Package '{}' failed {} consecutive times", name, failures);
+            // Package cannot be disabled, but still apply backoff to prevent infinite retry loop
+            set_backoff_delay(db_path, id, failures).ok();
+            tracing::warn!(
+                "Package '{}' failed {} times, backing off {} seconds",
+                name,
+                failures,
+                60 * (1u64 << failures.min(10))
+            );
         }
     } else {
         set_backoff_delay(db_path, id, failures).ok();
@@ -380,7 +387,15 @@ pub async fn run_schedule_loop(
                     "event_type": "schedule",
                 });
                 let context = pkg.build_context(&config_values, event_payload, None);
-                let pkg_input_params = serde_json::to_string(&config_values).unwrap_or_default();
+                // Filter out secret fields before recording to execution history
+                let mut safe_config = config_values.clone();
+                safe_config.retain(|k, _| {
+                    !k.contains("token")
+                        && !k.contains("secret")
+                        && !k.contains("api_key")
+                        && !k.starts_with("sk-")
+                });
+                let pkg_input_params = serde_json::to_string(&safe_config).unwrap_or_default();
                 let pkg_input_params = pkg_input_params
                     .chars()
                     .take(MAX_RESULT_LEN)

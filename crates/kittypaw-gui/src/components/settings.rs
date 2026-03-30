@@ -231,7 +231,9 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
                             move |_| {
                                 let token = tg_token.read().clone();
                                 let chat_id = tg_chat_id.read().clone();
-                                if !token.is_empty() {
+                                if token.is_empty() {
+                                    let _ = kittypaw_core::secrets::delete_secret("channels", "telegram_token");
+                                } else {
                                     let _ = kittypaw_core::secrets::set_secret("channels", "telegram_token", &token);
                                 }
                                 if !chat_id.is_empty() {

@@ -230,22 +230,14 @@ async fn execute_single_call(
 }
 
 async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
-    // Token resolution chain:
-    // 1. args[0] (from JS, which comes from config.telegram_token via get_config_with_defaults)
-    // 2. global channel secret from Settings
-    // 3. environment variable last resort
-    let bot_token = call
-        .args
-        .first()
-        .and_then(|v| v.as_str())
+    // Token resolution chain (token is NOT passed via args — the JS ABI is
+    // Telegram.sendMessage(chatId, text), so args carry only chat content):
+    // 1. global channel secret from Settings
+    // 2. environment variable fallback
+    let bot_token = kittypaw_core::secrets::get_secret("channels", "telegram_token")
+        .ok()
+        .flatten()
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .or_else(|| {
-            kittypaw_core::secrets::get_secret("channels", "telegram_token")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty())
-        })
         .or_else(|| std::env::var("KITTYPAW_TELEGRAM_TOKEN").ok())
         .ok_or_else(|| KittypawError::Config("Telegram bot token not configured".into()))?;
 
@@ -253,8 +245,9 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
 
     match call.method.as_str() {
         "sendMessage" => {
-            let chat_id = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
-            let text = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
+            // ABI: Telegram.sendMessage(chatId, text)
+            let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let text = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
 
             let url = format!("https://api.telegram.org/bot{bot_token}/sendMessage");
             let resp = client
@@ -275,8 +268,9 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
             Ok(body)
         }
         "sendPhoto" => {
-            let chat_id = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
-            let photo_url = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
+            // ABI: Telegram.sendPhoto(chatId, photoUrl)
+            let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let photo_url = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
 
             let url = format!("https://api.telegram.org/bot{bot_token}/sendPhoto");
             let resp = client
@@ -296,9 +290,10 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
             Ok(body)
         }
         "sendDocument" => {
-            let chat_id = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
-            let file_url = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
-            let caption = call.args.get(3).and_then(|v| v.as_str()).unwrap_or("");
+            // ABI: Telegram.sendDocument(chatId, fileUrl, caption?)
+            let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let file_url = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let caption = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
 
             let url = format!("https://api.telegram.org/bot{bot_token}/sendDocument");
             let mut payload = serde_json::json!({

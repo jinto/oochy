@@ -141,15 +141,17 @@ pub fn Dashboard() -> Element {
                         .collect()
                 };
 
-                // Detect time patterns for each skill, skip already dismissed
+                // Detect time patterns for each skill, skip already dismissed or accepted
                 let mut suggestions = Vec::new();
                 for (skill_id, skill_name) in &skill_ids {
                     let dismiss_key = format!("suggest_dismissed:{}", skill_id);
+                    let accept_key = format!("schedule_accepted:{}", skill_id);
                     if store
                         .get_user_context(&dismiss_key)
                         .ok()
                         .flatten()
                         .is_some()
+                        || store.get_user_context(&accept_key).ok().flatten().is_some()
                     {
                         continue;
                     }

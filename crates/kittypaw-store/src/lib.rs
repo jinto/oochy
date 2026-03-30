@@ -554,10 +554,16 @@ impl Store {
             }
         }
 
-        // Return keys where a single value appears >= 3 times
+        // Return keys where a single value appears >= 3 times,
+        // excluding any key that looks like a secret
         let mut patterns: Vec<(String, String)> = counts
             .into_iter()
-            .filter(|(_, count)| *count >= 3)
+            .filter(|((k, _), count)| {
+                *count >= 3
+                    && !k.contains("token")
+                    && !k.contains("secret")
+                    && !k.contains("api_key")
+            })
             .map(|((k, v), _)| (k, v))
             .collect();
         patterns.sort_by(|a, b| a.0.cmp(&b.0));
