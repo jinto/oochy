@@ -112,14 +112,15 @@
 - [x] user_context를 모든 스킬이 읽을 수 있게 (ctx.user.location 등)
 - [x] 자동 스킬 제안 (v1 Silent Memory Phase 2에서 detect_time_pattern으로 구현됨)
 
-### 보이지 않는 자기 개선
-- [ ] 실패한 스킬 자동 수정 (LLM 기반 파라미터 조정 — v1에서 제외한 것)
-- [ ] 성공한 스킬 최적화 (GEPA 방식, 사용자에게 보이지 않게)
-- [ ] 실행 로그 기록 (`execution.jsonl`)
+### 보이지 않는 자기 개선 ✅
+- [x] 실패 힌트 저장 + 성공 시 자동 클리어 (failure_hint user_context)
+- [x] 실행 로그 기록 (`~/.kittypaw/execution.jsonl`)
+- [ ] LLM 기반 파라미터 자동 조정 (v3로 이동 — LLM 호출 인프라 필요)
 
-### 세션간 기억
-- [ ] FTS5 전문 검색 + LLM 요약
-- [ ] 사용 패턴 기반 스킬 추천
+### 세션간 기억 ✅
+- [x] FTS5 전문 검색 (execution_fts 가상 테이블 + search_executions)
+- [ ] LLM 요약 (v3로 이동)
+- [ ] 사용 패턴 기반 스킬 추천 (v1에서 detect_time_pattern으로 일부 구현)
 
 ### 멀티채널 — 결과 알림으로
 - [ ] Slack 채널 어댑터 (결과 알림)

@@ -175,6 +175,31 @@ pub fn reset_failure_count(db_path: &str, skill_name: &str) -> Result<(), String
 
 // --- Schedule loop ---
 
+fn append_execution_log(
+    data_dir: &std::path::Path,
+    skill_id: &str,
+    success: bool,
+    duration_ms: i64,
+    output: &str,
+) {
+    let log_path = data_dir.join("execution.jsonl");
+    let entry = serde_json::json!({
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "skill": skill_id,
+        "success": success,
+        "duration_ms": duration_ms,
+        "output": output.chars().take(200).collect::<String>(),
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{}", entry);
+    }
+}
+
 fn handle_execution_failure(
     store: &kittypaw_store::Store,
     db_path: &str,
@@ -200,6 +225,14 @@ fn handle_execution_failure(
         failures as i32,
         input_params,
     );
+    // Store failure hint for self-improvement
+    let hint_key = format!("failure_hint:{}", id);
+    let hint = format!(
+        "Failed at {}: {}",
+        started_at.format("%H:%M"),
+        error_msg.chars().take(200).collect::<String>()
+    );
+    let _ = store.set_user_context(&hint_key, &hint, "auto");
     if failures >= 3 {
         if can_disable {
             tracing::warn!(
@@ -235,6 +268,10 @@ pub async fn run_schedule_loop(
     db_path: &str,
 ) {
     init_schedule_db(db_path).ok();
+    let data_dir = std::path::Path::new(db_path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
     loop {
         interval.tick().await;
@@ -313,6 +350,20 @@ pub async fn run_schedule_loop(
                         set_last_run(db_path, &skill.name, Utc::now()).ok();
                         reset_failure_count(db_path, &skill.name).ok();
 
+                        // Clear failure hint on success (self-improvement: retry succeeded)
+                        let hint_key = format!("failure_hint:{}", skill.name);
+                        if store.get_user_context(&hint_key).ok().flatten().is_some() {
+                            let _ = store.set_user_context(&hint_key, "", "cleared");
+                        }
+
+                        append_execution_log(
+                            &data_dir,
+                            &skill.name,
+                            true,
+                            duration_ms,
+                            &result.output,
+                        );
+
                         // Detect param patterns and persist as defaults
                         if let Ok(patterns) = store.detect_param_patterns(&skill.name) {
                             for (key, value) in patterns {
@@ -328,6 +379,8 @@ pub async fn run_schedule_loop(
                             result.error
                         );
                         let error_msg = result.error.unwrap_or_default();
+                        let skill_finished_at = chrono::Utc::now();
+                        let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
                         handle_execution_failure(
                             &store,
                             db_path,
@@ -338,19 +391,30 @@ pub async fn run_schedule_loop(
                             Some(&skill_input_params),
                             true,
                         );
+                        append_execution_log(
+                            &data_dir,
+                            &skill.name,
+                            false,
+                            duration_ms,
+                            &error_msg,
+                        );
                     }
                     Err(e) => {
                         tracing::error!("Scheduled skill '{}' execution error: {e}", skill.name);
+                        let skill_finished_at = chrono::Utc::now();
+                        let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
+                        let err_str = e.to_string();
                         handle_execution_failure(
                             &store,
                             db_path,
                             &skill.name,
                             &skill.name,
                             skill_started_at,
-                            &e.to_string(),
+                            &err_str,
                             Some(&skill_input_params),
                             true,
                         );
+                        append_execution_log(&data_dir, &skill.name, false, duration_ms, &err_str);
                     }
                 }
             }
@@ -446,6 +510,20 @@ pub async fn run_schedule_loop(
                         set_last_run(db_path, &pkg.meta.id, Utc::now()).ok();
                         reset_failure_count(db_path, &pkg.meta.id).ok();
 
+                        // Clear failure hint on success (self-improvement: retry succeeded)
+                        let hint_key = format!("failure_hint:{}", pkg.meta.id);
+                        if store.get_user_context(&hint_key).ok().flatten().is_some() {
+                            let _ = store.set_user_context(&hint_key, "", "cleared");
+                        }
+
+                        append_execution_log(
+                            &data_dir,
+                            &pkg.meta.id,
+                            true,
+                            duration_ms,
+                            &result.output,
+                        );
+
                         // Detect param patterns and persist as defaults
                         if let Ok(patterns) = store.detect_param_patterns(&pkg.meta.id) {
                             for (key, value) in patterns {
@@ -524,6 +602,8 @@ pub async fn run_schedule_loop(
                             result.error
                         );
                         let error_msg = result.error.unwrap_or_default();
+                        let pkg_finished_at = chrono::Utc::now();
+                        let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
                         handle_execution_failure(
                             &store,
                             db_path,
@@ -534,19 +614,30 @@ pub async fn run_schedule_loop(
                             Some(&pkg_input_params),
                             false,
                         );
+                        append_execution_log(
+                            &data_dir,
+                            &pkg.meta.id,
+                            false,
+                            duration_ms,
+                            &error_msg,
+                        );
                     }
                     Err(e) => {
                         tracing::error!("Scheduled package '{}' execution error: {e}", pkg.meta.id);
+                        let pkg_finished_at = chrono::Utc::now();
+                        let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
+                        let err_str = e.to_string();
                         handle_execution_failure(
                             &store,
                             db_path,
                             &pkg.meta.id,
                             &pkg.meta.name,
                             pkg_started_at,
-                            &e.to_string(),
+                            &err_str,
                             Some(&pkg_input_params),
                             false,
                         );
+                        append_execution_log(&data_dir, &pkg.meta.id, false, duration_ms, &err_str);
                     }
                 }
             }

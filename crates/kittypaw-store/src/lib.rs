@@ -22,6 +22,7 @@ fn migrations() -> Migrations<'static> {
         M::up(include_str!("migrations/003_workspaces.sql")),
         M::up(include_str!("migrations/004_permissions.sql")),
         M::up(include_str!("migrations/005_execution_history.sql")),
+        M::up(include_str!("migrations/006_fts5_memory.sql")),
     ])
 }
 
@@ -488,6 +489,32 @@ impl Store {
             params![format!("-{} days", days)],
         )?;
         Ok(deleted as u32)
+    }
+
+    /// Full-text search across execution history
+    pub fn search_executions(&self, query: &str, limit: usize) -> Result<Vec<ExecutionRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT e.id, e.skill_id, e.skill_name, e.started_at, e.duration_ms, e.result_summary, e.success, e.retry_count \
+             FROM execution_history e \
+             JOIN execution_fts f ON e.id = f.rowid \
+             WHERE execution_fts MATCH ?1 \
+             ORDER BY e.started_at DESC LIMIT ?2",
+        )?;
+        let records = stmt
+            .query_map(params![query, limit as i64], |row| {
+                Ok(ExecutionRecord {
+                    id: row.get(0)?,
+                    skill_id: row.get(1)?,
+                    skill_name: row.get(2)?,
+                    started_at: row.get(3)?,
+                    duration_ms: row.get(4)?,
+                    result_summary: row.get(5)?,
+                    success: row.get::<_, i32>(6)? != 0,
+                    retry_count: row.get(7)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(records)
     }
 
     /// Get a user context value by key
@@ -1128,6 +1155,49 @@ mod tests {
         store.set_user_context("timezone", "UTC", "system").unwrap();
         let v = store.get_user_context("timezone").unwrap();
         assert_eq!(v, Some("UTC".to_string()));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_search_executions() {
+        let path = temp_db_path();
+        let store = Store::open(path.to_str().unwrap()).unwrap();
+
+        store
+            .record_execution(
+                "weather",
+                "Weather Briefing",
+                "2026-03-30T09:00:00Z",
+                "2026-03-30T09:00:01Z",
+                1000,
+                "서울 8도 맑음",
+                true,
+                0,
+                None,
+            )
+            .unwrap();
+        store
+            .record_execution(
+                "rss",
+                "RSS Digest",
+                "2026-03-30T09:00:00Z",
+                "2026-03-30T09:00:02Z",
+                2000,
+                "Hacker News 3건 요약",
+                true,
+                0,
+                None,
+            )
+            .unwrap();
+
+        let results = store.search_executions("서울", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].skill_id, "weather");
+
+        let results = store.search_executions("Hacker", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].skill_id, "rss");
 
         let _ = std::fs::remove_file(&path);
     }
