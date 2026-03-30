@@ -121,17 +121,48 @@ pub fn Dashboard() -> Element {
     });
     let mut recent = use_signal::<Vec<ExecutionRecord>>(Vec::new);
     let mut installed_count = use_signal(|| 0u32);
+    // (skill_id, skill_name, suggested_cron)
+    let mut schedule_suggestions = use_signal::<Vec<(String, String)>>(Vec::new);
 
+    let packages_dir = app_state.packages_dir.clone();
+    let store_arc = app_state.store.clone();
     use_effect(move || {
-        if let Ok(store) = app_state.store.lock() {
+        if let Ok(store) = store_arc.lock() {
             if let Ok(s) = store.today_stats() {
                 stats.set(s);
             }
             if let Ok(r) = store.recent_executions(10) {
+                // Collect unique skill IDs from recent executions for time pattern analysis
+                let skill_ids: Vec<(String, String)> = {
+                    let mut seen = std::collections::HashSet::new();
+                    r.iter()
+                        .filter(|e| seen.insert(e.skill_id.clone()))
+                        .map(|e| (e.skill_id.clone(), e.skill_name.clone()))
+                        .collect()
+                };
+
+                // Detect time patterns for each skill, skip already dismissed
+                let mut suggestions = Vec::new();
+                for (skill_id, skill_name) in &skill_ids {
+                    let dismiss_key = format!("suggest_dismissed:{}", skill_id);
+                    if store
+                        .get_user_context(&dismiss_key)
+                        .ok()
+                        .flatten()
+                        .is_some()
+                    {
+                        continue;
+                    }
+                    // Only suggest if no schedule exists (no schedule trigger in recent)
+                    if let Ok(Some(_cron)) = store.detect_time_pattern(skill_id) {
+                        suggestions.push((skill_id.clone(), skill_name.clone()));
+                    }
+                }
+                schedule_suggestions.set(suggestions);
                 recent.set(r);
             }
         }
-        let mgr = PackageManager::new(app_state.packages_dir.clone());
+        let mgr = PackageManager::new(packages_dir.clone());
         if let Ok(pkgs) = mgr.list_installed() {
             installed_count.set(pkgs.len() as u32);
         }
@@ -142,6 +173,7 @@ pub fn Dashboard() -> Element {
     let silent_opts_val = stats.read().auto_retries.to_string();
     let quiet_count = stats.read().auto_retries;
     let activity = recent.read();
+    let suggestions = schedule_suggestions.read();
 
     rsx! {
         div {
@@ -208,6 +240,52 @@ pub fn Dashboard() -> Element {
                                             "— {description}"
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Schedule suggestions ──────────────────────────────────────
+            if !suggestions.is_empty() {
+                div {
+                    style: "{SECTION_TITLE_STYLE}",
+                    "Schedule Suggestions"
+                }
+                for (skill_id, skill_name) in suggestions.iter() {
+                    {
+                        let skill_id_accept = skill_id.clone();
+                        let skill_id_dismiss = skill_id.clone();
+                        let app_state_dismiss = app_state.clone();
+                        let mut schedule_suggestions_dismiss = schedule_suggestions.clone();
+                        rsx! {
+                            div {
+                                key: "suggest-{skill_id}",
+                                style: "background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 10px; padding: 14px 20px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: #92400E; margin-bottom: 10px;",
+                                span { style: "font-size: 16px;", "💡" }
+                                span {
+                                    style: "flex: 1;",
+                                    "{skill_name}을(를) 매일 자동 실행할까요?"
+                                }
+                                button {
+                                    style: "background: #F59E0B; border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #FFFFFF; cursor: pointer; margin-right: 6px;",
+                                    onclick: move |_| {
+                                        tracing::info!("Schedule suggestion accepted for skill: {}", skill_id_accept);
+                                    },
+                                    "수락"
+                                }
+                                button {
+                                    style: "background: transparent; border: 1px solid #D97706; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #92400E; cursor: pointer;",
+                                    onclick: move |_| {
+                                        let dismiss_key = format!("suggest_dismissed:{}", skill_id_dismiss);
+                                        if let Ok(store) = app_state_dismiss.store.lock() {
+                                            let _ = store.set_user_context(&dismiss_key, "1", "user");
+                                        }
+                                        let id_to_remove = skill_id_dismiss.clone();
+                                        schedule_suggestions_dismiss.write().retain(|(id, _)| *id != id_to_remove);
+                                    },
+                                    "닫기"
                                 }
                             }
                         }

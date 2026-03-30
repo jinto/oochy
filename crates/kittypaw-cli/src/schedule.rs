@@ -143,6 +143,24 @@ pub fn increment_failure_count(db_path: &str, skill_name: &str) -> Result<(), St
     Ok(())
 }
 
+/// After a failure, set last_run_at to a future time for exponential backoff.
+/// retry_delay = 60 * 2^failure_count seconds (1min, 2min, 4min).
+pub fn set_backoff_delay(
+    db_path: &str,
+    skill_name: &str,
+    failure_count: u32,
+) -> Result<(), String> {
+    let delay_secs = 60i64 * (1i64 << failure_count.min(10));
+    let backoff_time = Utc::now() + chrono::Duration::seconds(delay_secs);
+    let conn = open_schedule_db(db_path)?;
+    conn.execute(
+        "UPDATE skill_schedule SET last_run_at = ?1 WHERE skill_name = ?2",
+        params![backoff_time.to_rfc3339(), skill_name],
+    )
+    .map_err(|e| format!("Failed to set backoff delay: {e}"))?;
+    Ok(())
+}
+
 pub fn reset_failure_count(db_path: &str, skill_name: &str) -> Result<(), String> {
     let conn = open_schedule_db(db_path)?;
     conn.execute(
@@ -228,6 +246,14 @@ pub async fn run_schedule_loop(
                         );
                         set_last_run(db_path, &skill.name, Utc::now()).ok();
                         reset_failure_count(db_path, &skill.name).ok();
+
+                        // Detect param patterns and persist as defaults
+                        if let Ok(patterns) = store.detect_param_patterns(&skill.name) {
+                            for (key, value) in patterns {
+                                let ctx_key = format!("default:{}:{}", skill.name, key);
+                                let _ = store.set_user_context(&ctx_key, &value, "pattern");
+                            }
+                        }
                     }
                     Ok(result) => {
                         tracing::warn!(
@@ -261,11 +287,20 @@ pub async fn run_schedule_loop(
                                 failures
                             );
                             let _ = kittypaw_core::skill::disable_skill(&skill.name);
+                        } else {
+                            set_backoff_delay(db_path, &skill.name, failures).ok();
+                            tracing::info!(
+                                "Skill '{}' retry scheduled with {}s backoff (failure {})",
+                                skill.name,
+                                60 * (1u32 << failures.min(10)),
+                                failures
+                            );
                         }
                     }
                     Err(e) => {
                         tracing::error!("Scheduled skill '{}' execution error: {e}", skill.name);
                         increment_failure_count(db_path, &skill.name).ok();
+                        let failures = get_failure_count(db_path, &skill.name);
                         let skill_finished_at = Utc::now();
                         let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
                         let _ = store.record_execution(
@@ -276,8 +311,11 @@ pub async fn run_schedule_loop(
                             duration_ms,
                             &e.to_string().chars().take(500).collect::<String>(),
                             false,
-                            get_failure_count(db_path, &skill.name) as i32,
+                            failures as i32,
                         );
+                        if failures < 3 {
+                            set_backoff_delay(db_path, &skill.name, failures).ok();
+                        }
                     }
                 }
             }
@@ -294,8 +332,21 @@ pub async fn run_schedule_loop(
                 }
 
                 tracing::info!("Running scheduled package: {}", pkg.meta.id);
+                // Collect pattern-detected defaults from user_context
+                let pattern_defaults: std::collections::HashMap<String, String> = {
+                    let prefix = format!("default:{}:", pkg.meta.id);
+                    let mut map = std::collections::HashMap::new();
+                    // Read all user_context keys with this prefix via store
+                    if let Ok(ctx_keys) = store.list_user_context_prefix(&prefix) {
+                        for (full_key, value) in ctx_keys {
+                            let config_key = full_key[prefix.len()..].to_string();
+                            map.insert(config_key, value);
+                        }
+                    }
+                    map
+                };
                 let config_values = pkg_mgr
-                    .get_config_with_defaults(&pkg.meta.id)
+                    .get_config_with_defaults_and_patterns(&pkg.meta.id, &pattern_defaults)
                     .unwrap_or_default();
                 let event_payload = serde_json::json!({
                     "event_type": "schedule",
@@ -340,6 +391,14 @@ pub async fn run_schedule_loop(
                         );
                         set_last_run(db_path, &pkg.meta.id, Utc::now()).ok();
                         reset_failure_count(db_path, &pkg.meta.id).ok();
+
+                        // Detect param patterns and persist as defaults
+                        if let Ok(patterns) = store.detect_param_patterns(&pkg.meta.id) {
+                            for (key, value) in patterns {
+                                let ctx_key = format!("default:{}:{}", pkg.meta.id, key);
+                                let _ = store.set_user_context(&ctx_key, &value, "pattern");
+                            }
+                        }
 
                         // Execute chain steps if present
                         if !pkg.chain.is_empty() {
@@ -410,6 +469,7 @@ pub async fn run_schedule_loop(
                             result.error
                         );
                         increment_failure_count(db_path, &pkg.meta.id).ok();
+                        let pkg_failures = get_failure_count(db_path, &pkg.meta.id);
                         let pkg_finished_at = Utc::now();
                         let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
                         let _ = store.record_execution(
@@ -425,12 +485,28 @@ pub async fn run_schedule_loop(
                                 .take(500)
                                 .collect::<String>(),
                             false,
-                            get_failure_count(db_path, &pkg.meta.id) as i32,
+                            pkg_failures as i32,
                         );
+                        if pkg_failures >= 3 {
+                            tracing::warn!(
+                                "Package '{}' auto-disabled after {} consecutive failures",
+                                pkg.meta.id,
+                                pkg_failures
+                            );
+                        } else {
+                            set_backoff_delay(db_path, &pkg.meta.id, pkg_failures).ok();
+                            tracing::info!(
+                                "Package '{}' retry scheduled with {}s backoff (failure {})",
+                                pkg.meta.id,
+                                60 * (1u32 << pkg_failures.min(10)),
+                                pkg_failures
+                            );
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Scheduled package '{}' execution error: {e}", pkg.meta.id);
                         increment_failure_count(db_path, &pkg.meta.id).ok();
+                        let pkg_failures = get_failure_count(db_path, &pkg.meta.id);
                         let pkg_finished_at = Utc::now();
                         let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
                         let _ = store.record_execution(
@@ -441,8 +517,11 @@ pub async fn run_schedule_loop(
                             duration_ms,
                             &e.to_string().chars().take(500).collect::<String>(),
                             false,
-                            get_failure_count(db_path, &pkg.meta.id) as i32,
+                            pkg_failures as i32,
                         );
+                        if pkg_failures < 3 {
+                            set_backoff_delay(db_path, &pkg.meta.id, pkg_failures).ok();
+                        }
                     }
                 }
             }

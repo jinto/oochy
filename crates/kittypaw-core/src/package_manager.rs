@@ -218,6 +218,16 @@ impl PackageManager {
 
     /// Get all config values, merging defaults from schema.
     pub fn get_config_with_defaults(&self, id: &str) -> Result<HashMap<String, String>> {
+        self.get_config_with_defaults_and_patterns(id, &HashMap::new())
+    }
+
+    /// Get all config values, merging defaults from schema, channel globals,
+    /// pattern-detected defaults, and saved config (highest priority).
+    pub fn get_config_with_defaults_and_patterns(
+        &self,
+        id: &str,
+        pattern_defaults: &HashMap<String, String>,
+    ) -> Result<HashMap<String, String>> {
         let pkg = self.load_package(id)?;
         let saved = self.get_config(id)?;
 
@@ -241,6 +251,9 @@ impl PackageManager {
                 }
             }
         }
+
+        // Apply pattern-detected defaults (overrides channel globals, overridden by saved config)
+        merged.extend(pattern_defaults.iter().map(|(k, v)| (k.clone(), v.clone())));
 
         // Override with saved values (highest priority)
         merged.extend(saved);

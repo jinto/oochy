@@ -66,15 +66,15 @@
 - [x] 에러 핸들링 (네트워크 실패, 호환성, 오프라인 시 캐시 표시)
 - [x] 보안: SSRF 방어 (URL 화이트리스트), path traversal 차단 (ID 검증), 패키지 ID 일치 확인
 
-### 🔴 P0: Silent Memory (Phase 1 ✅)
+### 🔴 P0: Silent Memory ✅
 > "같은 엔진, 다른 차" — Hermes의 기술을 KittyPaw 철학으로 쓴다
 - [x] kittypaw-store migration 005: execution_history + user_context 테이블
 - [x] schedule.rs `run_skill()` 후 실행 기록 삽입
 - [x] 대시보드 실데이터 연결 (mock → DB 쿼리)
 - [x] 프라이버시: 결과 500자 제한, 30일 자동 삭제
-- [ ] 패턴 매칭: 같은 파라미터 3회 → 기본값 자동 적용
-- [ ] 패턴 매칭: 실패 시 자동 재시도 (exponential backoff)
-- [ ] 패턴 매칭: 시간 패턴 감지 → 스케줄 제안
+- [x] 패턴 매칭: 같은 파라미터 3회 → 기본값 자동 적용
+- [x] 패턴 매칭: 실패 시 자동 재시도 (exponential backoff)
+- [x] 패턴 매칭: 시간 패턴 감지 → 스케줄 제안 (대시보드 제안 카드)
 
 ### 🔴 P0: GUI 대시보드 퍼스트 ✅
 > 메인 화면은 "내 자동화 현황판" — 채팅이 아니다
