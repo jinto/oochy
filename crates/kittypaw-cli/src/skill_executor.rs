@@ -215,6 +215,8 @@ async fn execute_single_call(
 ) -> SkillResult {
     let result = match call.skill_name.as_str() {
         "Telegram" => execute_telegram(call).await,
+        "Slack" => execute_slack(call).await,
+        "Discord" => execute_discord(call).await,
         "Http" => execute_http(call, allowed_hosts).await,
         "Web" => execute_web(call, allowed_hosts).await,
         "Llm" => execute_llm(call, config, llm_call_count).await,
@@ -318,6 +320,111 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
         }
         _ => Err(KittypawError::CapabilityDenied(format!(
             "Unknown Telegram method: {}",
+            call.method
+        ))),
+    }
+}
+
+async fn execute_slack(call: &SkillCall) -> Result<serde_json::Value> {
+    // Token resolution: global channel secret from Settings, then env var fallback
+    let bot_token = kittypaw_core::secrets::get_secret("channels", "slack_token")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("KITTYPAW_SLACK_TOKEN").ok())
+        .ok_or_else(|| KittypawError::Config("Slack bot token not configured".into()))?;
+
+    let client = reqwest::Client::new();
+
+    match call.method.as_str() {
+        "sendMessage" => {
+            // ABI: Slack.sendMessage(channelId, text)
+            let channel_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let text = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+
+            let resp = client
+                .post("https://slack.com/api/chat.postMessage")
+                .header("Authorization", format!("Bearer {bot_token}"))
+                .json(&serde_json::json!({
+                    "channel": channel_id,
+                    "text": text,
+                }))
+                .send()
+                .await
+                .map_err(|e| KittypawError::Skill(format!("Slack API error: {e}")))?;
+
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| KittypawError::Skill(format!("Slack response parse error: {e}")))?;
+
+            if !body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let err = body
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                return Err(KittypawError::Skill(format!(
+                    "Slack postMessage error: {err}"
+                )));
+            }
+
+            Ok(body)
+        }
+        _ => Err(KittypawError::CapabilityDenied(format!(
+            "Unknown Slack method: {}",
+            call.method
+        ))),
+    }
+}
+
+async fn execute_discord(call: &SkillCall) -> Result<serde_json::Value> {
+    // Token resolution: global channel secret from Settings, then env var fallback
+    let bot_token = kittypaw_core::secrets::get_secret("channels", "discord_token")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("KITTYPAW_DISCORD_TOKEN").ok())
+        .ok_or_else(|| KittypawError::Config("Discord bot token not configured".into()))?;
+
+    let client = reqwest::Client::new();
+
+    match call.method.as_str() {
+        "sendMessage" => {
+            // ABI: Discord.sendMessage(channelId, text)
+            let channel_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            let text = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+
+            let url = format!("https://discord.com/api/v10/channels/{channel_id}/messages");
+            let resp = client
+                .post(&url)
+                .header("Authorization", format!("Bot {bot_token}"))
+                .json(&serde_json::json!({
+                    "content": text,
+                }))
+                .send()
+                .await
+                .map_err(|e| KittypawError::Skill(format!("Discord API error: {e}")))?;
+
+            let status = resp.status();
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| KittypawError::Skill(format!("Discord response parse error: {e}")))?;
+
+            if !status.is_success() {
+                let err = body
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                return Err(KittypawError::Skill(format!(
+                    "Discord send message error {status}: {err}"
+                )));
+            }
+
+            Ok(body)
+        }
+        _ => Err(KittypawError::CapabilityDenied(format!(
+            "Unknown Discord method: {}",
             call.method
         ))),
     }

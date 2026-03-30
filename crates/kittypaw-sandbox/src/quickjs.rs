@@ -14,6 +14,8 @@ pub(crate) const KNOWN_SKILLS: &[(&str, &[&str])] = &[
         "Telegram",
         &["sendMessage", "sendPhoto", "editMessage", "sendDocument"],
     ),
+    ("Slack", &["sendMessage"]),
+    ("Discord", &["sendMessage"]),
     ("Http", &["get", "post", "put", "delete"]),
     ("Storage", &["get", "set", "delete", "list"]),
     ("Llm", &["generate"]),

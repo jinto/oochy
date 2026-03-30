@@ -123,8 +123,8 @@
 - [ ] 사용 패턴 기반 스킬 추천 (v1에서 detect_time_pattern으로 일부 구현)
 
 ### 멀티채널 — 결과 알림으로
-- [ ] Slack 채널 어댑터 (결과 알림)
-- [ ] Discord 채널 어댑터 (결과 알림)
+- [x] Slack 채널 어댑터 (Channel trait + skill executor + Settings UI)
+- [x] Discord 채널 어댑터 (Channel trait + skill executor + Settings UI)
 - [ ] 카카오톡 연동
 - [ ] 크로스 채널 컨텍스트 (사용자 ID 기반 통합)
 

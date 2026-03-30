@@ -29,6 +29,14 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
     let mut tg_chat_id = use_signal(String::new);
     let mut tg_saved = use_signal(|| false);
 
+    // Slack channel signals
+    let mut slack_token = use_signal(String::new);
+    let mut slack_saved = use_signal(|| false);
+
+    // Discord channel signals
+    let mut discord_token = use_signal(String::new);
+    let mut discord_saved = use_signal(|| false);
+
     // Load current key on mount
     {
         let app_state = app_state.clone();
@@ -58,12 +66,25 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
             if let Ok(Some(chat_id)) = kittypaw_core::secrets::get_secret("channels", "chat_id") {
                 tg_chat_id.set(chat_id);
             }
+
+            // Load stored Slack channel config
+            if let Ok(Some(token)) = kittypaw_core::secrets::get_secret("channels", "slack_token") {
+                slack_token.set(token);
+            }
+
+            // Load stored Discord channel config
+            if let Ok(Some(token)) = kittypaw_core::secrets::get_secret("channels", "discord_token")
+            {
+                discord_token.set(token);
+            }
         });
     }
 
     let app_state_save = app_state.clone();
     let app_state_local_save = app_state.clone();
     let app_state_tg_save = app_state.clone();
+    let _app_state_slack_save = app_state.clone();
+    let _app_state_discord_save = app_state.clone();
 
     rsx! {
         // Tab panel — fills the main content area
@@ -248,6 +269,90 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
 
                 p { style: "font-size: 12px; color: #78716C; line-height: 1.5;",
                     "스킬에서 공통으로 사용할 텔레그램 설정입니다. 개별 스킬에서 오버라이드할 수 있습니다."
+                }
+            }
+
+            // ── Slack section ──
+            div {
+                style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; padding: 24px; margin-top: 16px;",
+
+                div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                    span { style: "font-size: 12px; font-weight: 600; color: #78716C; white-space: nowrap;", "채널 연결 (Slack)" }
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                }
+
+                div { style: "margin-bottom: 14px;",
+                    label { style: "display: block; font-size: 13px; font-weight: 600; color: #1C1917; margin-bottom: 6px;", "봇 토큰" }
+                    input {
+                        style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; font-family: monospace; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917;",
+                        r#type: "password",
+                        placeholder: "xoxb-...",
+                        value: "{slack_token}",
+                        oninput: move |e| slack_token.set(e.value()),
+                    }
+                }
+
+                div { style: "display: flex; justify-content: flex-end; margin-bottom: 14px;",
+                    button {
+                        style: "padding: 8px 20px; background: #1C1917; color: #F5F3F0; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;",
+                        onclick: move |_| {
+                            let token = slack_token.read().clone();
+                            if token.is_empty() {
+                                let _ = kittypaw_core::secrets::delete_secret("channels", "slack_token");
+                            } else {
+                                let _ = kittypaw_core::secrets::set_secret("channels", "slack_token", &token);
+                            }
+                            slack_saved.set(true);
+                        },
+                        if slack_saved() { "저장 완료" } else { "저장" }
+                    }
+                }
+
+                p { style: "font-size: 12px; color: #78716C; line-height: 1.5;",
+                    "스킬에서 공통으로 사용할 Slack 설정입니다. 개별 스킬에서 오버라이드할 수 있습니다."
+                }
+            }
+
+            // ── Discord section ──
+            div {
+                style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; padding: 24px; margin-top: 16px;",
+
+                div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                    span { style: "font-size: 12px; font-weight: 600; color: #78716C; white-space: nowrap;", "채널 연결 (Discord)" }
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                }
+
+                div { style: "margin-bottom: 14px;",
+                    label { style: "display: block; font-size: 13px; font-weight: 600; color: #1C1917; margin-bottom: 6px;", "봇 토큰" }
+                    input {
+                        style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; font-family: monospace; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917;",
+                        r#type: "password",
+                        placeholder: "MTxxxxxxx.xxxxxx.xxxxxxxxxxxxxxxxxxxxxxxxxx",
+                        value: "{discord_token}",
+                        oninput: move |e| discord_token.set(e.value()),
+                    }
+                }
+
+                div { style: "display: flex; justify-content: flex-end; margin-bottom: 14px;",
+                    button {
+                        style: "padding: 8px 20px; background: #1C1917; color: #F5F3F0; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;",
+                        onclick: move |_| {
+                            let token = discord_token.read().clone();
+                            if token.is_empty() {
+                                let _ = kittypaw_core::secrets::delete_secret("channels", "discord_token");
+                            } else {
+                                let _ = kittypaw_core::secrets::set_secret("channels", "discord_token", &token);
+                            }
+                            discord_saved.set(true);
+                        },
+                        if discord_saved() { "저장 완료" } else { "저장" }
+                    }
+                }
+
+                p { style: "font-size: 12px; color: #78716C; line-height: 1.5;",
+                    "스킬에서 공통으로 사용할 Discord 설정입니다. 개별 스킬에서 오버라이드할 수 있습니다."
                 }
             }
         }

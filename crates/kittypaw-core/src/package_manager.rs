@@ -241,7 +241,14 @@ impl PackageManager {
         }
 
         // Channel global keys that can be provided from Settings
-        const CHANNEL_KEYS: &[&str] = &["telegram_token", "chat_id"];
+        const CHANNEL_KEYS: &[&str] = &[
+            "telegram_token",
+            "chat_id",
+            "slack_token",
+            "slack_channel",
+            "discord_token",
+            "discord_channel",
+        ];
 
         // Apply channel globals (overrides schema defaults, overridden by per-skill saved config)
         for &key in CHANNEL_KEYS {
