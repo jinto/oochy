@@ -175,58 +175,104 @@ pub fn reset_failure_count(db_path: &str, skill_name: &str) -> Result<(), String
 
 // --- Schedule loop ---
 
-/// Send improvement notification to user's configured channel.
-/// Tries Telegram first (token + chat_id), then Slack (token + slack_channel).
-/// Silently does nothing if no channel is configured.
-async fn send_improvement_notification(message: &str) {
-    // Try Telegram first
-    let tg_token = kittypaw_core::secrets::get_secret("channels", "telegram_token")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty());
-    let tg_chat_id = kittypaw_core::secrets::get_secret("channels", "chat_id")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty());
+/// Caches HTTP client and channel credentials; sends notifications without
+/// re-reading secrets or re-allocating a client on every call.
+struct NotificationSender {
+    client: reqwest::Client,
+    telegram: Option<(String, String)>, // (token, chat_id)
+    slack: Option<(String, String)>,    // (token, channel)
+}
 
-    if let (Some(token), Some(chat_id)) = (tg_token, tg_chat_id) {
-        let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
-        let body = serde_json::json!({
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "Markdown",
-        });
-        let client = reqwest::Client::new();
-        tokio::spawn(async move {
-            let _ = client.post(&url).json(&body).send().await;
-        });
-        return;
+impl NotificationSender {
+    fn new() -> Self {
+        let telegram = match (
+            kittypaw_core::secrets::get_secret("channels", "telegram_token")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            kittypaw_core::secrets::get_secret("channels", "chat_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+        ) {
+            (Some(token), Some(chat_id)) => Some((token, chat_id)),
+            _ => None,
+        };
+        let slack = match (
+            kittypaw_core::secrets::get_secret("channels", "slack_token")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+            kittypaw_core::secrets::get_secret("channels", "slack_channel")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty()),
+        ) {
+            (Some(token), Some(channel)) => Some((token, channel)),
+            _ => None,
+        };
+        Self {
+            client: reqwest::Client::new(),
+            telegram,
+            slack,
+        }
     }
 
-    // Try Slack
-    let slack_token = kittypaw_core::secrets::get_secret("channels", "slack_token")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty());
-    let slack_channel = kittypaw_core::secrets::get_secret("channels", "slack_channel")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty());
+    fn send(&self, message: &str) {
+        if let Some((token, chat_id)) = &self.telegram {
+            let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
+            let body =
+                serde_json::json!({"chat_id": chat_id, "text": message, "parse_mode": "Markdown"});
+            let client = self.client.clone();
+            tokio::spawn(async move {
+                if let Err(e) = client.post(&url).json(&body).send().await {
+                    tracing::warn!("Notification failed: {e}");
+                }
+            });
+            return;
+        }
+        if let Some((token, channel)) = &self.slack {
+            let body = serde_json::json!({"channel": channel, "text": message});
+            let client = self.client.clone();
+            let token = token.clone();
+            tokio::spawn(async move {
+                if let Err(e) = client
+                    .post("https://slack.com/api/chat.postMessage")
+                    .header("Authorization", format!("Bearer {}", token))
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    tracing::warn!("Slack notification failed: {e}");
+                }
+            });
+        }
+    }
 
-    if let (Some(token), Some(channel)) = (slack_token, slack_channel) {
-        let body = serde_json::json!({
-            "channel": channel,
-            "text": message,
-        });
-        let client = reqwest::Client::new();
-        tokio::spawn(async move {
-            let _ = client
-                .post("https://slack.com/api/chat.postMessage")
-                .header("Authorization", format!("Bearer {token}"))
-                .json(&body)
-                .send()
-                .await;
-        });
+    fn notify_recovery(&self, name: &str) {
+        self.send(&format!(
+            "🔧 *{}* 자동 복구됨\n실패 후 자동 재시도로 정상 작동 중입니다.",
+            name
+        ));
+    }
+
+    fn notify_patterns(&self, name: &str, patterns: &[(String, String)]) {
+        let list: Vec<String> = patterns
+            .iter()
+            .map(|(k, v)| format!("  → {} = {}", k, v))
+            .collect();
+        self.send(&format!(
+            "📊 *{}* 패턴 감지\n반복 사용된 값을 기본값으로 설정했습니다:\n{}",
+            name,
+            list.join("\n")
+        ));
+    }
+
+    fn notify_retry(&self, name: &str, failures: u32, delay_secs: u64) {
+        self.send(&format!(
+            "⏳ *{}* 재시도 예정\n{}초 후 자동 재시도합니다 (시도 {}/3).",
+            name, delay_secs, failures
+        ));
     }
 }
 
@@ -337,6 +383,7 @@ pub async fn run_schedule_loop(
                 continue;
             }
         };
+        let notifier = NotificationSender::new();
         let _ = store.cleanup_old_executions(30);
         // Clean up execution.jsonl — delete if larger than 10MB
         {
@@ -421,11 +468,7 @@ pub async fn run_schedule_loop(
                         let hint_key = format!("failure_hint:{}", skill.name);
                         if store.get_user_context(&hint_key).ok().flatten().is_some() {
                             let _ = store.set_user_context(&hint_key, "", "cleared");
-                            send_improvement_notification(&format!(
-                                "🔧 *{}* 자동 복구됨\n실패 후 자동 재시도로 정상 작동 중입니다.",
-                                skill.name
-                            ))
-                            .await;
+                            notifier.notify_recovery(&skill.name);
                         }
 
                         append_execution_log(
@@ -439,16 +482,7 @@ pub async fn run_schedule_loop(
                         // Detect param patterns and persist as defaults
                         if let Ok(patterns) = store.detect_param_patterns(&skill.name) {
                             if !patterns.is_empty() {
-                                let pattern_list: Vec<String> = patterns
-                                    .iter()
-                                    .map(|(k, v)| format!("  → {} = {}", k, v))
-                                    .collect();
-                                send_improvement_notification(&format!(
-                                    "📊 *{}* 패턴 감지\n반복 사용된 값을 기본값으로 설정했습니다:\n{}",
-                                    skill.name,
-                                    pattern_list.join("\n")
-                                ))
-                                .await;
+                                notifier.notify_patterns(&skill.name, &patterns);
                             }
                             for (key, value) in patterns {
                                 let ctx_key = format!("default:{}:{}", skill.name, key);
@@ -467,11 +501,7 @@ pub async fn run_schedule_loop(
                         let duration_ms = (skill_finished_at - skill_started_at).num_milliseconds();
                         let failures = get_failure_count(db_path, &skill.name) + 1;
                         let delay_secs = 60u64 * (1u64 << failures.min(10));
-                        send_improvement_notification(&format!(
-                            "⏳ *{}* 재시도 예정\n{}초 후 자동 재시도합니다 (시도 {}/3).",
-                            skill.name, delay_secs, failures
-                        ))
-                        .await;
+                        notifier.notify_retry(&skill.name, failures, delay_secs);
                         handle_execution_failure(
                             &store,
                             db_path,
@@ -497,11 +527,7 @@ pub async fn run_schedule_loop(
                         let err_str = e.to_string();
                         let failures = get_failure_count(db_path, &skill.name) + 1;
                         let delay_secs = 60u64 * (1u64 << failures.min(10));
-                        send_improvement_notification(&format!(
-                            "⏳ *{}* 재시도 예정\n{}초 후 자동 재시도합니다 (시도 {}/3).",
-                            skill.name, delay_secs, failures
-                        ))
-                        .await;
+                        notifier.notify_retry(&skill.name, failures, delay_secs);
                         handle_execution_failure(
                             &store,
                             db_path,
@@ -619,11 +645,7 @@ pub async fn run_schedule_loop(
                         let hint_key = format!("failure_hint:{}", pkg.meta.id);
                         if store.get_user_context(&hint_key).ok().flatten().is_some() {
                             let _ = store.set_user_context(&hint_key, "", "cleared");
-                            send_improvement_notification(&format!(
-                                "🔧 *{}* 자동 복구됨\n실패 후 자동 재시도로 정상 작동 중입니다.",
-                                pkg.meta.id
-                            ))
-                            .await;
+                            notifier.notify_recovery(&pkg.meta.id);
                         }
 
                         append_execution_log(
@@ -637,16 +659,7 @@ pub async fn run_schedule_loop(
                         // Detect param patterns and persist as defaults
                         if let Ok(patterns) = store.detect_param_patterns(&pkg.meta.id) {
                             if !patterns.is_empty() {
-                                let pattern_list: Vec<String> = patterns
-                                    .iter()
-                                    .map(|(k, v)| format!("  → {} = {}", k, v))
-                                    .collect();
-                                send_improvement_notification(&format!(
-                                    "📊 *{}* 패턴 감지\n반복 사용된 값을 기본값으로 설정했습니다:\n{}",
-                                    pkg.meta.id,
-                                    pattern_list.join("\n")
-                                ))
-                                .await;
+                                notifier.notify_patterns(&pkg.meta.id, &patterns);
                             }
                             for (key, value) in patterns {
                                 let ctx_key = format!("default:{}:{}", pkg.meta.id, key);
@@ -737,11 +750,7 @@ pub async fn run_schedule_loop(
                         let duration_ms = (pkg_finished_at - pkg_started_at).num_milliseconds();
                         let failures = get_failure_count(db_path, &pkg.meta.id) + 1;
                         let delay_secs = 60u64 * (1u64 << failures.min(10));
-                        send_improvement_notification(&format!(
-                            "⏳ *{}* 재시도 예정\n{}초 후 자동 재시도합니다 (시도 {}/3).",
-                            pkg.meta.id, delay_secs, failures
-                        ))
-                        .await;
+                        notifier.notify_retry(&pkg.meta.id, failures, delay_secs);
                         handle_execution_failure(
                             &store,
                             db_path,
@@ -767,11 +776,7 @@ pub async fn run_schedule_loop(
                         let err_str = e.to_string();
                         let failures = get_failure_count(db_path, &pkg.meta.id) + 1;
                         let delay_secs = 60u64 * (1u64 << failures.min(10));
-                        send_improvement_notification(&format!(
-                            "⏳ *{}* 재시도 예정\n{}초 후 자동 재시도합니다 (시도 {}/3).",
-                            pkg.meta.id, delay_secs, failures
-                        ))
-                        .await;
+                        notifier.notify_retry(&pkg.meta.id, failures, delay_secs);
                         handle_execution_failure(
                             &store,
                             db_path,
