@@ -7,6 +7,13 @@ use kittypaw_llm::openai::OpenAiProvider;
 use crate::state::AppState;
 
 #[component]
+pub fn SettingsPanel() -> Element {
+    rsx! {
+        SettingsDialog { on_close: move |_| {} }
+    }
+}
+
+#[component]
 pub fn SettingsDialog(on_close: EventHandler) -> Element {
     let app_state = use_context::<AppState>();
     let mut api_key = use_signal(String::new);
@@ -43,45 +50,41 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
     let app_state_local_save = app_state.clone();
 
     rsx! {
-        // Overlay
+        // Tab panel — fills the main content area
         div {
-            style: "position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100;",
-            onclick: move |_| on_close.call(()),
+            style: "flex: 1; background: #F5F3F0; padding: 32px; overflow-y: auto;",
 
-            // Panel (stop propagation)
+            // Page header
+            div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px;",
+                h1 { style: "font-size: 24px; font-weight: 600; color: #1C1917; margin: 0;", "Settings" }
+                button {
+                    style: "background: none; border: 1px solid #E7E5E4; border-radius: 6px; padding: 6px 14px; font-size: 13px; color: #78716C; cursor: pointer;",
+                    onclick: move |_| on_close.call(()),
+                    "Back"
+                }
+            }
+
+            // ── Anthropic API Key section ──
             div {
-                style: "background: #fff; border-radius: 16px; padding: 28px; width: 520px; max-width: 94vw; box-shadow: 0 20px 60px rgba(0,0,0,0.2);",
-                onclick: move |e| e.stop_propagation(),
+                style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; padding: 24px; margin-bottom: 16px;",
 
-                div { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;",
-                    h2 { style: "font-size: 18px; font-weight: 600; color: #1e293b; margin: 0;", "Settings" }
-                    button {
-                        style: "background: none; border: none; font-size: 18px; color: #94a3b8; cursor: pointer;",
-                        onclick: move |_| on_close.call(()),
-                        "X"
-                    }
+                div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                    span { style: "font-size: 12px; font-weight: 600; color: #78716C; white-space: nowrap;", "Anthropic API Key" }
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                }
+                p { style: "font-size: 12px; color: #78716C; margin-bottom: 8px;", "Your API key is stored locally." }
+                input {
+                    style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; font-family: monospace; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917;",
+                    r#type: "password",
+                    placeholder: "sk-ant-...",
+                    value: "{api_key}",
+                    oninput: move |e| api_key.set(e.value()),
                 }
 
-                // ── Anthropic API Key section ──
-                div { style: "margin-bottom: 8px;",
-                    div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
-                        div { style: "flex: 1; height: 1px; background: #e5e7eb;" }
-                        span { style: "font-size: 12px; font-weight: 600; color: #6b7280; white-space: nowrap;", "Anthropic API Key" }
-                        div { style: "flex: 1; height: 1px; background: #e5e7eb;" }
-                    }
-                    p { style: "font-size: 12px; color: #6b7280; margin-bottom: 8px;", "Your API key is stored locally." }
-                    input {
-                        style: "width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; font-family: monospace; outline: none; box-sizing: border-box;",
-                        r#type: "password",
-                        placeholder: "sk-ant-...",
-                        value: "{api_key}",
-                        oninput: move |e| api_key.set(e.value()),
-                    }
-                }
-
-                div { style: "display: flex; justify-content: flex-end; margin-bottom: 24px;",
+                div { style: "display: flex; justify-content: flex-end; margin-top: 14px;",
                     button {
-                        style: "padding: 10px 24px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;",
+                        style: "padding: 8px 20px; background: #1C1917; color: #F5F3F0; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;",
                         onclick: {
                             let state = app_state_save.clone();
                             move |_| {
@@ -106,72 +109,74 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
                         if saved() { "Saved" } else { "Save" }
                     }
                 }
+            }
 
-                // ── 로컬 모델 연결 section ──
-                div { style: "margin-bottom: 16px;",
-                    div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
-                        div { style: "flex: 1; height: 1px; background: #e5e7eb;" }
-                        span { style: "font-size: 12px; font-weight: 600; color: #6b7280; white-space: nowrap;", "로컬 모델 연결" }
-                        div { style: "flex: 1; height: 1px; background: #e5e7eb;" }
+            // ── 로컬 모델 연결 section ──
+            div {
+                style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; padding: 24px;",
+
+                div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                    span { style: "font-size: 12px; font-weight: 600; color: #78716C; white-space: nowrap;", "로컬 모델 연결" }
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                }
+
+                div { style: "margin-bottom: 12px;",
+                    label { style: "display: block; font-size: 13px; font-weight: 600; color: #1C1917; margin-bottom: 6px;", "모델 서버 URL" }
+                    input {
+                        style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917;",
+                        r#type: "text",
+                        placeholder: "http://localhost:11434/v1",
+                        value: "{local_url}",
+                        oninput: move |e| local_url.set(e.value()),
                     }
+                }
 
-                    div { style: "margin-bottom: 12px;",
-                        label { style: "display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;", "모델 서버 URL" }
-                        input {
-                            style: "width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box;",
-                            r#type: "text",
-                            placeholder: "http://localhost:11434/v1",
-                            value: "{local_url}",
-                            oninput: move |e| local_url.set(e.value()),
-                        }
+                div { style: "margin-bottom: 14px;",
+                    label { style: "display: block; font-size: 13px; font-weight: 600; color: #1C1917; margin-bottom: 6px;", "모델 이름" }
+                    input {
+                        style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917;",
+                        r#type: "text",
+                        placeholder: "qwen3.5:27b",
+                        value: "{local_model}",
+                        oninput: move |e| local_model.set(e.value()),
                     }
+                }
 
-                    div { style: "margin-bottom: 12px;",
-                        label { style: "display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px;", "모델 이름" }
-                        input {
-                            style: "width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; outline: none; box-sizing: border-box;",
-                            r#type: "text",
-                            placeholder: "qwen3.5:27b",
-                            value: "{local_model}",
-                            oninput: move |e| local_model.set(e.value()),
-                        }
-                    }
-
-                    div { style: "display: flex; justify-content: flex-end; margin-bottom: 12px;",
-                        button {
-                            style: "padding: 10px 24px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;",
-                            onclick: {
-                                let state = app_state_local_save.clone();
-                                move |_| {
-                                    let url = local_url.read().clone();
-                                    let model = local_model.read().clone();
-                                    if !url.is_empty() && !model.is_empty() {
-                                        let _ = kittypaw_core::secrets::set_secret("local_model", "base_url", &url);
-                                        let _ = kittypaw_core::secrets::set_secret("local_model", "model_name", &model);
-                                        let mut registry = state.llm_registry.lock().unwrap();
-                                        registry.register(
-                                            "local",
-                                            Arc::new(OpenAiProvider::with_base_url(
-                                                url,
-                                                String::new(),
-                                                model,
-                                                4096,
-                                            )),
-                                        );
-                                        registry.set_default("local");
-                                    }
-                                    local_saved.set(true);
+                div { style: "display: flex; justify-content: flex-end; margin-bottom: 14px;",
+                    button {
+                        style: "padding: 8px 20px; background: #1C1917; color: #F5F3F0; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;",
+                        onclick: {
+                            let state = app_state_local_save.clone();
+                            move |_| {
+                                let url = local_url.read().clone();
+                                let model = local_model.read().clone();
+                                if !url.is_empty() && !model.is_empty() {
+                                    let _ = kittypaw_core::secrets::set_secret("local_model", "base_url", &url);
+                                    let _ = kittypaw_core::secrets::set_secret("local_model", "model_name", &model);
+                                    let mut registry = state.llm_registry.lock().unwrap();
+                                    registry.register(
+                                        "local",
+                                        Arc::new(OpenAiProvider::with_base_url(
+                                            url,
+                                            String::new(),
+                                            model,
+                                            4096,
+                                        )),
+                                    );
+                                    registry.set_default("local");
                                 }
-                            },
-                            if local_saved() { "저장 완료" } else { "저장" }
-                        }
+                                local_saved.set(true);
+                            }
+                        },
+                        if local_saved() { "저장 완료" } else { "저장" }
                     }
+                }
 
-                    p { style: "font-size: 12px; color: #6b7280; line-height: 1.5;",
-                        "Ollama, LM Studio 등 OpenAI 호환 API 서버를 연결합니다."
-                        br {}
-                        "로컬 모델 연결 시 API 키 없이 무료로 사용할 수 있습니다."
-                    }
+                p { style: "font-size: 12px; color: #78716C; line-height: 1.5;",
+                    "Ollama, LM Studio 등 OpenAI 호환 API 서버를 연결합니다."
+                    br {}
+                    "로컬 모델 연결 시 API 키 없이 무료로 사용할 수 있습니다."
                 }
             }
         }

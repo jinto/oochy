@@ -51,3 +51,4 @@ htmlcov/
 .coverage
 .omc/
 .playwright-cli/
+.gstack/

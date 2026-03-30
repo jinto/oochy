@@ -29,10 +29,7 @@ fn main() {
     let store =
         Store::open(db_path.to_str().unwrap_or("kittypaw.db")).expect("Failed to open database");
 
-    let persisted_key = kittypaw_core::secrets::get_secret("settings", "api_key")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let persisted_key = std::env::var("KITTYPAW_API_KEY").ok().unwrap_or_default();
 
     let mut llm_registry = LlmRegistry::new();
     if !persisted_key.is_empty() {
@@ -46,10 +43,9 @@ fn main() {
         );
     }
 
-    if let (Ok(Some(url)), Ok(Some(model))) = (
-        kittypaw_core::secrets::get_secret("local_model", "base_url"),
-        kittypaw_core::secrets::get_secret("local_model", "model_name"),
-    ) {
+    let local_url = std::env::var("KITTYPAW_LOCAL_URL").ok();
+    let local_model = std::env::var("KITTYPAW_LOCAL_MODEL").ok();
+    if let (Some(url), Some(model)) = (local_url, local_model) {
         llm_registry.register(
             "local",
             Arc::new(OpenAiProvider::with_base_url(
