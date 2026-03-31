@@ -148,6 +148,14 @@
 - [ ] teach loop 키워드 분류기 (automation→경량, analysis→중간)
 - [ ] 대화 중 자동 모델 교체
 
+### 스킬 설정 위자드 (pi-wizard 영감)
+- [ ] skill_config.rs를 단계별 위자드로 — 필드를 한 번에 하나씩, 안내 텍스트 포함
+- [ ] 스킬별 setup guide (예: "텔레그램에서 @BotFather → /newbot → 토큰 복사")
+
+### Extension 시스템 (v3+, 검토 필요)
+- [ ] 스킬이 커스텀 UI를 그리거나 도구를 등록할 수 있는 확장 레이어
+- [ ] agentskills.io 호환 검토 (Pi/Claude Code/Codex CLI 공용 스킬 포맷)
+
 ### 기타 백로그
 - [ ] 웹 검색 프로바이더 폴백 체인 (Exa → DuckDuckGo)
 - [ ] 스킬 체이닝 병렬 실행 (`parallel()`)
