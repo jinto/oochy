@@ -1,0 +1,35 @@
+[package]
+id = "lotto-check"
+name = "로또 당첨 확인"
+version = "1.0.0"
+description = "매주 토요일 저녁 로또 당첨 번호를 자동으로 조회해 내 번호와 비교한 결과를 텔레그램으로 알려줍니다."
+author = "KittyPaw Team"
+category = "entertainment"
+tags = ["lotto", "telegram", "schedule", "lottery"]
+
+[trigger]
+type = "schedule"
+cron = "0 21 * * 6"
+
+[permissions]
+primitives = ["Http", "Telegram"]
+allowed_hosts = ["www.dhlottery.co.kr"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "my_numbers"
+label = "내 로또 번호"
+type = "string"
+required = true
+hint = "쉼표로 구분된 6개 번호 (예: 3,8,15,23,29,42)"

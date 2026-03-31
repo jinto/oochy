@@ -1,0 +1,47 @@
+[package]
+id = "delivery-tracker"
+name = "배송 조회"
+version = "1.0.0"
+description = "택배 배송 상태를 주기적으로 확인해 변경 사항이 있을 때만 텔레그램으로 알려줍니다."
+author = "KittyPaw Team"
+category = "utility"
+tags = ["delivery", "telegram", "schedule", "sweettracker"]
+
+[trigger]
+type = "schedule"
+cron = "0 */2 * * *"
+
+[permissions]
+primitives = ["Http", "Telegram", "Storage"]
+allowed_hosts = ["info.sweettracker.co.kr"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "carrier"
+label = "택배사"
+type = "select"
+required = true
+options = ["CJ대한통운", "한진택배", "롯데택배", "우체국"]
+
+[[config.fields]]
+key = "tracking_number"
+label = "운송장 번호"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "api_key"
+label = "스마트택배 API 키"
+type = "secret"
+required = true

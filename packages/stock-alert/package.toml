@@ -1,0 +1,57 @@
+[package]
+id = "stock-alert"
+name = "주식 알림"
+version = "1.0.0"
+description = "지정한 종목이 목표 상한가 또는 하한가를 돌파하면 텔레그램으로 즉시 알림을 보냅니다."
+author = "KittyPaw Team"
+category = "finance"
+tags = ["stock", "telegram", "alert", "naver-finance", "korea"]
+
+[trigger]
+type = "schedule"
+cron = "*/30 9-16 * * 1-5"
+
+[permissions]
+primitives = ["Http", "Telegram", "Storage"]
+allowed_hosts = ["m.stock.naver.com"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "stock_code"
+label = "종목코드"
+type = "string"
+required = false
+default = "005930"
+hint = "종목코드 (예: 005930=삼성전자)"
+
+[[config.fields]]
+key = "stock_name"
+label = "종목명"
+type = "string"
+required = false
+default = "삼성전자"
+
+[[config.fields]]
+key = "target_high"
+label = "목표 상한가"
+type = "number"
+required = false
+hint = "목표 상한가"
+
+[[config.fields]]
+key = "target_low"
+label = "목표 하한가"
+type = "number"
+required = false
+hint = "목표 하한가"

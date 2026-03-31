@@ -38,6 +38,36 @@ const BUNDLED_PACKAGES: &[BundledPackage] = &[
         main_js: include_str!("../../../packages/url-monitor/main.js"),
         readme: include_str!("../../../packages/url-monitor/README.md"),
     },
+    BundledPackage {
+        id: "air-quality",
+        package_toml: include_str!("../../../packages/air-quality/package.toml"),
+        main_js: include_str!("../../../packages/air-quality/main.js"),
+        readme: include_str!("../../../packages/air-quality/README.md"),
+    },
+    BundledPackage {
+        id: "delivery-tracker",
+        package_toml: include_str!("../../../packages/delivery-tracker/package.toml"),
+        main_js: include_str!("../../../packages/delivery-tracker/main.js"),
+        readme: include_str!("../../../packages/delivery-tracker/README.md"),
+    },
+    BundledPackage {
+        id: "lotto-check",
+        package_toml: include_str!("../../../packages/lotto-check/package.toml"),
+        main_js: include_str!("../../../packages/lotto-check/main.js"),
+        readme: include_str!("../../../packages/lotto-check/README.md"),
+    },
+    BundledPackage {
+        id: "news-digest-kr",
+        package_toml: include_str!("../../../packages/news-digest-kr/package.toml"),
+        main_js: include_str!("../../../packages/news-digest-kr/main.js"),
+        readme: include_str!("../../../packages/news-digest-kr/README.md"),
+    },
+    BundledPackage {
+        id: "stock-alert",
+        package_toml: include_str!("../../../packages/stock-alert/package.toml"),
+        main_js: include_str!("../../../packages/stock-alert/main.js"),
+        readme: include_str!("../../../packages/stock-alert/README.md"),
+    },
 ];
 
 pub fn install_bundled_packages(packages_dir: &Path) {

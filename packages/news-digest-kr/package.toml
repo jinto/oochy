@@ -1,0 +1,44 @@
+[package]
+id = "news-digest-kr"
+name = "오늘의 뉴스 요약"
+version = "1.0.0"
+description = "매일 아침 구글 뉴스에서 주요 기사를 가져와 LLM으로 한 줄 요약 후 텔레그램으로 전송합니다."
+author = "KittyPaw Team"
+category = "news"
+tags = ["news", "telegram", "daily", "llm", "google-news"]
+
+[trigger]
+type = "schedule"
+cron = "0 8 * * *"
+
+[permissions]
+primitives = ["Http", "Telegram", "Llm"]
+allowed_hosts = ["news.google.com"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "category"
+label = "뉴스 카테고리"
+type = "select"
+required = false
+default = "경제"
+options = ["정치", "경제", "사회", "IT과학", "세계"]
+
+[[config.fields]]
+key = "count"
+label = "요약할 기사 수"
+type = "number"
+required = false
+default = 5
+hint = "요약할 기사 수"

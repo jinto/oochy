@@ -1,0 +1,50 @@
+[package]
+id = "air-quality"
+name = "미세먼지 알림"
+version = "1.0.0"
+description = "매일 아침 미세먼지/초미세먼지 등급을 확인하고 텔레그램으로 알려줍니다."
+author = "KittyPaw Team"
+category = "health"
+tags = ["air", "dust", "health", "telegram", "korea"]
+
+[trigger]
+type = "schedule"
+cron = "0 7 * * *"
+
+[permissions]
+primitives = ["Http", "Telegram"]
+allowed_hosts = ["apis.data.go.kr"]
+
+[[config.fields]]
+key = "telegram_token"
+label = "텔레그램 봇 토큰"
+type = "secret"
+required = true
+
+[[config.fields]]
+key = "chat_id"
+label = "텔레그램 채팅 ID"
+type = "string"
+required = true
+
+[[config.fields]]
+key = "api_key"
+label = "에어코리아 API 키 (data.go.kr)"
+type = "secret"
+required = true
+hint = "data.go.kr에서 '한국환경공단_에어코리아_대기오염정보' API 키를 발급받으세요"
+
+[[config.fields]]
+key = "station"
+label = "측정소명"
+type = "string"
+required = false
+default = "종로구"
+hint = "가까운 측정소명 (예: 종로구, 강남구, 해운대구)"
+
+[[config.fields]]
+key = "schedule"
+label = "Cron Schedule"
+type = "cron"
+required = false
+default = "0 7 * * *"
