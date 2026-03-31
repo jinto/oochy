@@ -66,11 +66,17 @@ pub async fn run_agent_loop(
 ) -> Result<String> {
     let agent_id = agent_id_for_event(&event);
 
-    // Load or create agent state — lock only for this operation.
+    // Load or create agent state — ensure agent exists in DB before adding turns.
     let mut state = {
         let s = store.lock().unwrap();
-        s.load_state(&agent_id)?
-            .unwrap_or_else(|| AgentState::new(&agent_id, SYSTEM_PROMPT))
+        match s.load_state(&agent_id)? {
+            Some(existing) => existing,
+            None => {
+                let new_state = AgentState::new(&agent_id, SYSTEM_PROMPT);
+                s.save_state(&new_state)?;
+                new_state
+            }
+        }
     };
 
     // Build prompt messages

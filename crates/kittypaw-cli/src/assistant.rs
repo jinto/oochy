@@ -116,11 +116,17 @@ fn is_admin_event(event: &Event, config: &Config) -> bool {
 pub async fn run_assistant_turn(ctx: &AssistantContext<'_>) -> Result<AssistantTurn> {
     let agent_id = assistant_id_for_event(ctx.event);
 
-    // Load conversation state
+    // Load or create agent state — ensure agent exists in DB before adding turns
     let mut state = {
         let s = ctx.store.lock().unwrap();
-        s.load_state(&agent_id)?
-            .unwrap_or_else(|| AgentState::new(&agent_id, SYSTEM_PROMPT))
+        match s.load_state(&agent_id)? {
+            Some(existing) => existing,
+            None => {
+                let new_state = AgentState::new(&agent_id, SYSTEM_PROMPT);
+                s.save_state(&new_state)?;
+                new_state
+            }
+        }
     };
 
     // Load user context for personalization
