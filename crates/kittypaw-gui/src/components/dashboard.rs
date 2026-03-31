@@ -262,8 +262,8 @@ pub fn Dashboard() -> Element {
                         let skill_id_dismiss = skill_id.clone();
                         let app_state_accept = app_state.clone();
                         let app_state_dismiss = app_state.clone();
-                        let mut schedule_suggestions_accept = schedule_suggestions.clone();
-                        let mut schedule_suggestions_dismiss = schedule_suggestions.clone();
+                        let mut schedule_suggestions_accept = schedule_suggestions;
+                        let mut schedule_suggestions_dismiss = schedule_suggestions;
                         rsx! {
                             div {
                                 key: "suggest-{skill_id}",

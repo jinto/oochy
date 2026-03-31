@@ -301,6 +301,7 @@ fn append_execution_log(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_execution_failure(
     store: &kittypaw_store::Store,
     db_path: &str,
@@ -701,10 +702,10 @@ pub async fn run_schedule_loop(
                                                     .chain
                                                     .get(step_idx)
                                                     .and_then(|s| s.model.as_deref())
-                                                    .or_else(|| chain_pkg.model.as_deref());
+                                                    .or(chain_pkg.model.as_deref());
                                                 let _ = crate::skill_executor::execute_skill_calls(
                                                     &chain_result.skill_calls,
-                                                    &config,
+                                                    config,
                                                     preresolved,
                                                     Some(&chain_pkg.meta.id),
                                                     Some(&mut checker),

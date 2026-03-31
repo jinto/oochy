@@ -386,6 +386,7 @@ impl Store {
     // ── Execution History ──────────────────────────────────────────────────
 
     /// Record a skill execution
+    #[allow(clippy::too_many_arguments)]
     pub fn record_execution(
         &self,
         skill_id: &str,
@@ -666,7 +667,7 @@ impl Store {
         }
 
         // Check if any hour bucket (with ±1 window) has 3+ hits
-        for (&base_hour, _) in &hour_counts {
+        for &base_hour in hour_counts.keys() {
             let window_count: u32 = hours
                 .iter()
                 .filter(|&&h| {
