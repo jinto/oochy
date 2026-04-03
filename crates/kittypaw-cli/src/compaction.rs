@@ -153,6 +153,17 @@ pub fn compaction_for_attempt(attempt: usize) -> CompactionConfig {
     }
 }
 
+/// Rough token estimate for prompt budgeting.
+/// ASCII chars ≈ 1 token per 4 chars, CJK ≈ 1 token per 1.5 chars.
+/// Returns a conservative (high) estimate to avoid TokenLimit errors.
+pub fn estimate_tokens(text: &str) -> usize {
+    let mut count = 0usize;
+    for ch in text.chars() {
+        count += if ch.is_ascii() { 1 } else { 2 };
+    }
+    count / 3
+}
+
 /// Compact conversation turns into `LlmMessage`s using 3-stage compaction.
 ///
 /// Stages:
@@ -386,5 +397,25 @@ mod tests {
         assert_eq!(c2.recent_window, c3.recent_window);
         assert_eq!(c2.middle_window, c3.middle_window);
         assert_eq!(c2.truncate_len, c3.truncate_len);
+    }
+
+    #[test]
+    fn test_estimate_tokens_ascii() {
+        assert_eq!(estimate_tokens("hello world"), 3);
+    }
+
+    #[test]
+    fn test_estimate_tokens_korean() {
+        assert_eq!(estimate_tokens("안녕하세요"), 3);
+    }
+
+    #[test]
+    fn test_estimate_tokens_mixed() {
+        assert_eq!(estimate_tokens("Hello 세상"), 3);
+    }
+
+    #[test]
+    fn test_estimate_tokens_empty() {
+        assert_eq!(estimate_tokens(""), 0);
     }
 }

@@ -143,6 +143,25 @@ pub async fn run_agent_loop(
             "prompt built with compaction"
         );
 
+        // Proactive token budget check - skip LLM call if prompt is too large
+        let est_tokens: usize = messages
+            .iter()
+            .map(|m| crate::compaction::estimate_tokens(&m.content))
+            .sum();
+        const TOKEN_BUDGET: usize = 8_000;
+        if est_tokens > TOKEN_BUDGET && attempt < MAX_RETRIES - 1 {
+            tracing::warn!(
+                est_tokens,
+                budget = TOKEN_BUDGET,
+                attempt,
+                "Prompt exceeds token budget, applying tighter compaction"
+            );
+            last_error = Some(format!(
+                "Estimated {est_tokens} tokens exceeds budget {TOKEN_BUDGET}"
+            ));
+            continue;
+        }
+
         // If we had an error, append it as feedback
         if let Some(ref err) = last_error {
             messages.push(LlmMessage {

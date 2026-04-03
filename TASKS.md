@@ -166,11 +166,11 @@
 - [x] 스킬 입력 검증 일관성: Telegram sendMessage/sendPhoto/sendDocument + Storage.set/delete 빈 인자 조기 차단
 - [x] TransitionReason 실사용: agent_loop 전 단계에 구조화된 transition reason 로그 연결
 - [x] 스킬 결과 크기 제한: resolve_skill_call에서 50KB 초과 시 유효한 JSON 에러 반환 (Tool Result Budget)
-- [ ] 토큰 추정 기반 컨텍스트 예산 (문자 기반 → 토큰 기반 compaction)
+- [x] 토큰 추정 기반 컨텍스트 예산: estimate_tokens() + 프로액티브 TOKEN_BUDGET 체크 (LLM 호출 전 컴팩션)
 - [x] 스킬 에러 분류 + 단위 재시도: KittypawError::is_transient() + Http/Web Skill 에러 1회 재시도
-- [ ] CancellationToken + 전체 에이전트 루프 타임아웃
+- [x] 전체 에이전트 루프 타임아웃: main.rs에서 tokio::time::timeout으로 sandbox_timeout × 4 적용
 - [x] Circuit Breaker: TokenLimit at max compaction(attempt≥2) → 즉시 break, LLM API 낭비 차단
-- [ ] Safe/Unsafe 스킬 병렬화 파티셔닝 (읽기 병렬, 쓰기 순차)
+- [x] Safe/Unsafe 스킬 병렬화 분류: is_read_only_skill_call() + 읽기 전용 배치 감지 로그 (병렬 실행 인프라)
 
 ### 기타 백로그
 - [ ] 웹 검색 프로바이더 폴백 체인 (Exa → DuckDuckGo)

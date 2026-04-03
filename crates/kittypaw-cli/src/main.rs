@@ -1241,15 +1241,20 @@ async fn run_stdin() {
         std::process::exit(1);
     })));
 
-    // Run agent loop
-    // TODO: connect to GUI permission dialog
-    match agent_loop::run_agent_loop(event, &*provider, &sandbox, store, &config, None, None).await
-    {
-        Ok(output) => {
+    // Run agent loop with overall timeout to prevent indefinite blocking
+    let timeout_secs = config.sandbox.timeout_secs as u64 * 4; // e.g. 30 * 4 = 120s
+    let loop_future =
+        agent_loop::run_agent_loop(event, &*provider, &sandbox, store, &config, None, None);
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), loop_future).await {
+        Ok(Ok(output)) => {
             println!("{output}");
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+        Err(_elapsed) => {
+            eprintln!("Error: agent loop timed out after {timeout_secs}s");
             std::process::exit(1);
         }
     }

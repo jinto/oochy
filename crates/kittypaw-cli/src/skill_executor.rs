@@ -229,6 +229,19 @@ pub fn resolve_storage_calls(
         .collect()
 }
 
+fn is_read_only_skill_call(call: &SkillCall) -> bool {
+    matches!(
+        (call.skill_name.as_str(), call.method.as_str()),
+        ("Http", "get")
+            | ("Web", "search")
+            | ("Web", "fetch")
+            | ("Env", "get")
+            | ("File", "read")
+            | ("Storage", "get")
+            | ("Storage", "list")
+    )
+}
+
 /// Execute captured skill calls on the host side (outside sandbox).
 /// Each skill call was captured by JS stubs inside QuickJS and is now
 /// executed with real API calls after capability checking.
@@ -247,6 +260,15 @@ pub async fn execute_skill_calls(
     let allowed_hosts = &config.sandbox.allowed_hosts;
     // Per-execution LLM call counter (not global, avoids race between concurrent executions)
     let llm_call_count = AtomicU32::new(0);
+    let (safe_calls, unsafe_calls): (Vec<_>, Vec<_>) = skill_calls
+        .iter()
+        .partition(|call| is_read_only_skill_call(call));
+    tracing::debug!(
+        total_calls = skill_calls.len(),
+        safe_calls = safe_calls.len(),
+        unsafe_calls = unsafe_calls.len(),
+        "classified skill calls for safe/unsafe execution"
+    );
     // Sequential execution: skill calls are ordered side-effects from JS.
     // Parallel would break ordering guarantees (message order, read-after-write).
     let mut results = Vec::new();
@@ -1308,6 +1330,61 @@ mod tests {
             method: method.to_string(),
             args,
         }
+    }
+
+    #[test]
+    fn test_is_read_only_http_get() {
+        let call = SkillCall {
+            skill_name: "Http".to_string(),
+            method: "get".to_string(),
+            args: vec![],
+        };
+
+        assert!(is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_not_read_only_http_post() {
+        let call = SkillCall {
+            skill_name: "Http".to_string(),
+            method: "post".to_string(),
+            args: vec![],
+        };
+
+        assert!(!is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_not_read_only_telegram() {
+        let call = SkillCall {
+            skill_name: "Telegram".to_string(),
+            method: "sendMessage".to_string(),
+            args: vec![],
+        };
+
+        assert!(!is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_read_only_storage_get() {
+        let call = SkillCall {
+            skill_name: "Storage".to_string(),
+            method: "get".to_string(),
+            args: vec![],
+        };
+
+        assert!(is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_not_read_only_storage_set() {
+        let call = SkillCall {
+            skill_name: "Storage".to_string(),
+            method: "set".to_string(),
+            args: vec![],
+        };
+
+        assert!(!is_read_only_skill_call(&call));
     }
 
     fn make_telegram_call(method: &str, args: Vec<serde_json::Value>) -> SkillCall {
