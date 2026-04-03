@@ -1242,6 +1242,7 @@ async fn run_stdin() {
     })));
 
     // Run agent loop
+    // TODO: connect to GUI permission dialog
     match agent_loop::run_agent_loop(event, &*provider, &sandbox, store, &config, None, None).await
     {
         Ok(output) => {

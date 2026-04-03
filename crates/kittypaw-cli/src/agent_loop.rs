@@ -56,8 +56,7 @@ pub async fn run_agent_loop(
     store: Arc<Mutex<Store>>,
     config: &kittypaw_core::config::Config,
     on_token: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>>,
-    // TODO: wire permission checks to sandbox file operations
-    _on_permission_request: Option<
+    on_permission_request: Option<
         Arc<
             dyn Fn(PermissionRequest) -> tokio::sync::oneshot::Receiver<PermissionDecision>
                 + Send
@@ -226,11 +225,13 @@ pub async fn run_agent_loop(
         let store_for_resolver = Arc::clone(&store);
         let config_for_resolver = Arc::new(config.clone());
         let checker_for_resolver = checker.clone();
+        let permission_for_resolver = on_permission_request.clone();
         let skill_resolver: Option<kittypaw_sandbox::SkillResolver> =
             Some(Arc::new(move |call: kittypaw_core::types::SkillCall| {
                 let store = Arc::clone(&store_for_resolver);
                 let config = Arc::clone(&config_for_resolver);
                 let checker = checker_for_resolver.clone();
+                let _on_permission = permission_for_resolver.clone();
                 Box::pin(async move {
                     crate::skill_executor::resolve_skill_call(
                         &call,

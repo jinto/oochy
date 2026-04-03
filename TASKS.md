@@ -159,7 +159,7 @@
 ### Agent Runtime Hardening (Claude Code 분석 참고)
 - [x] `agent_loop.rs` 상태 전이 명시화 (`generate` → `execute` → `retry` → `finish`) + transition reason 로그
 - [x] 단계별 컨텍스트 압축: 최근 턴 유지 + tool/output 축약 + 오래된 대화 요약
-- [ ] sandbox file/network permission popup wiring 완료 (`AskUser`, `AllowOnce`, `AllowPermanent`)
+- [x] sandbox file/network permission popup wiring 완료 (`AskUser`, `AllowOnce`, `AllowPermanent`)
 - [x] 기능 플래그 / kill switch 레이어 (background agents, model routing, experimental channels)
 - [x] 실패 복구 정책 고도화: token budget 초과 시 compact 후 재시도, 프롬프트 축소, 경량 모델 fallback
 

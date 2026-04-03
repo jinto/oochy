@@ -1,13 +1,19 @@
 use dioxus::prelude::*;
 
-use super::{chat, dashboard, onboarding, settings, sidebar, skill_gallery};
-use crate::state::AppState;
+use super::{chat, dashboard, onboarding, permission_dialog, settings, sidebar, skill_gallery};
+use crate::state::{AppState, PermissionQueue};
 
 #[component]
 pub fn App() -> Element {
     let app_state = use_context::<AppState>();
     let mut active_tab = use_signal(|| "dashboard".to_string());
     let mut onboarding_done = use_signal(|| false);
+
+    // Provide the reactive permission queue as context so that both the
+    // dialog component and any async tasks can push / pop requests.
+    use_context_provider(|| PermissionQueue {
+        requests: Signal::new(Vec::new()),
+    });
 
     // Check on mount whether onboarding was already completed
     {
@@ -58,5 +64,8 @@ pub fn App() -> Element {
                 }
             }
         }
+
+        // Permission modal — renders on top of everything when requests are pending.
+        permission_dialog::PermissionDialog {}
     }
 }

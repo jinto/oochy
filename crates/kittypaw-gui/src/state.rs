@@ -1,8 +1,26 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use dioxus::prelude::*;
 use kittypaw_llm::registry::LlmRegistry;
 use kittypaw_store::Store;
+
+/// A permission request awaiting user decision, paired with the channel to
+/// deliver the verdict back to the requester.
+pub struct PendingPermission {
+    pub request: kittypaw_core::permission::PermissionRequest,
+    pub responder: tokio::sync::oneshot::Sender<kittypaw_core::permission::PermissionDecision>,
+}
+
+/// Reactive queue of pending permission requests.
+///
+/// Provided as a separate Dioxus context (via `use_context_provider` in the
+/// root component) because `Signal` requires a live reactive scope that only
+/// exists inside the component tree.
+#[derive(Clone, Copy)]
+pub struct PermissionQueue {
+    pub requests: Signal<Vec<PendingPermission>>,
+}
 
 #[derive(Clone)]
 pub struct AppState {

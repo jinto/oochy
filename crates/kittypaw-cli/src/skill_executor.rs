@@ -6,8 +6,16 @@ use tokio::sync::Mutex;
 
 use kittypaw_core::capability::CapabilityChecker;
 use kittypaw_core::error::{KittypawError, Result};
+use kittypaw_core::permission::{PermissionDecision, PermissionRequest, ResourceKind};
 use kittypaw_core::types::SkillCall;
 use kittypaw_store::Store;
+
+/// Callback that sends a [`PermissionRequest`] to the UI and returns a one-shot
+/// channel carrying the user's decision. When absent (`None`), file operations
+/// are auto-allowed (backward-compatible with callers that have no UI).
+pub type PermissionCallback = Arc<
+    dyn Fn(PermissionRequest) -> tokio::sync::oneshot::Receiver<PermissionDecision> + Send + Sync,
+>;
 
 const LLM_MAX_CALLS_PER_EXECUTION: u32 = 3;
 
@@ -28,6 +36,65 @@ fn check_capability(
     } else {
         Ok(())
     }
+}
+
+/// Check file-level permission before a `File.read` or `File.write` operation.
+///
+/// When `on_permission` is `None`, the call is auto-allowed (legacy/headless mode).
+/// Otherwise, a [`PermissionRequest`] is sent through the callback and the caller
+/// blocks until the UI responds with a [`PermissionDecision`].
+///
+/// Returns `Ok(())` when the operation may proceed, or an `Err` with a
+/// user-facing message when the request was denied or the channel dropped.
+async fn check_file_permission(
+    call: &SkillCall,
+    on_permission: Option<&PermissionCallback>,
+) -> std::result::Result<(), String> {
+    let cb = match on_permission {
+        Some(cb) => cb,
+        None => return Ok(()), // auto-allow
+    };
+
+    let action = match call.method.as_str() {
+        "read" => "read",
+        "write" => "write",
+        _ => return Ok(()), // unknown methods are rejected later by execute_file
+    };
+
+    let path = call
+        .args
+        .first()
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let request = PermissionRequest {
+        request_id: uuid_v4(),
+        resource_kind: ResourceKind::File,
+        resource_path: path,
+        action: action.to_string(),
+        workspace_id: String::new(), // filled by caller if workspace-scoped
+    };
+
+    let rx = cb(request);
+    match rx.await {
+        Ok(PermissionDecision::AllowOnce | PermissionDecision::AllowPermanent) => Ok(()),
+        Ok(PermissionDecision::Deny) => Err(format!("Permission denied: File.{action}")),
+        Err(_) => Err("Permission check failed: response channel dropped".to_string()),
+    }
+}
+
+/// Generate a simple v4-style UUID without pulling in the `uuid` crate.
+fn uuid_v4() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    // Mix with thread-local counter for uniqueness within the same nanosecond.
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{nanos:032x}-{seq:08x}")
 }
 
 /// Execute a single skill call inline (for use as a SkillResolver callback).
@@ -103,6 +170,7 @@ pub async fn resolve_skill_call(
         None,
         &llm_call_count,
         None,
+        None, // on_permission: auto-allow (no UI in resolver path)
     )
     .await;
 
@@ -181,6 +249,7 @@ pub async fn execute_skill_calls(
                 skill_context,
                 &llm_call_count,
                 model_override,
+                None, // on_permission: auto-allow (batch path)
             )
             .await
         };
@@ -225,6 +294,7 @@ async fn execute_single_call(
     _skill_context: Option<&str>,
     llm_call_count: &AtomicU32,
     model_override: Option<&str>,
+    on_permission: Option<&PermissionCallback>,
 ) -> SkillResult {
     let result = match call.skill_name.as_str() {
         "Telegram" => execute_telegram(call, config).await,
@@ -233,7 +303,10 @@ async fn execute_single_call(
         "Http" => execute_http(call, allowed_hosts).await,
         "Web" => execute_web(call, allowed_hosts).await,
         "Llm" => execute_llm(call, config, llm_call_count, model_override).await,
-        "File" => execute_file(call, None),
+        "File" => match check_file_permission(call, on_permission).await {
+            Ok(()) => execute_file(call, None),
+            Err(msg) => Err(KittypawError::CapabilityDenied(msg)),
+        },
         "Env" => execute_env(call, None),
         _ => Err(KittypawError::CapabilityDenied(format!(
             "Unknown skill: {}",
