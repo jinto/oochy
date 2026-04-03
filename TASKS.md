@@ -161,7 +161,7 @@
 - [x] 단계별 컨텍스트 압축: 최근 턴 유지 + tool/output 축약 + 오래된 대화 요약
 - [ ] sandbox file/network permission popup wiring 완료 (`AskUser`, `AllowOnce`, `AllowPermanent`)
 - [ ] 기능 플래그 / kill switch 레이어 (background agents, model routing, experimental channels)
-- [ ] 실패 복구 정책 고도화: token budget 초과 시 compact 후 재시도, 프롬프트 축소, 경량 모델 fallback
+- [x] 실패 복구 정책 고도화: token budget 초과 시 compact 후 재시도, 프롬프트 축소, 경량 모델 fallback
 
 ### 기타 백로그
 - [ ] 웹 검색 프로바이더 폴백 체인 (Exa → DuckDuckGo)

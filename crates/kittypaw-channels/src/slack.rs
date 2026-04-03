@@ -36,15 +36,14 @@ impl SlackChannel {
             .body("")
             .send()
             .await
-            .map_err(|e| {
-                KittypawError::Llm(format!("apps.connections.open request failed: {}", e))
+            .map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("apps.connections.open request failed: {}", e),
             })?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| {
-            KittypawError::Llm(format!(
-                "Failed to parse apps.connections.open response: {}",
-                e
-            ))
+        let body: serde_json::Value = resp.json().await.map_err(|e| KittypawError::Llm {
+            kind: kittypaw_core::error::LlmErrorKind::Other,
+            message: format!("Failed to parse apps.connections.open response: {}", e),
         })?;
 
         if !body.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -52,16 +51,19 @@ impl SlackChannel {
                 .get("error")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown error");
-            return Err(KittypawError::Llm(format!(
-                "apps.connections.open error: {}",
-                err
-            )));
+            return Err(KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("apps.connections.open error: {}", err),
+            });
         }
 
         body.get("url")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .ok_or_else(|| KittypawError::Llm("apps.connections.open: missing url".to_string()))
+            .ok_or_else(|| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: "apps.connections.open: missing url".to_string(),
+            })
     }
 }
 
@@ -257,12 +259,15 @@ impl Channel for SlackChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| KittypawError::Llm(format!("Slack postMessage failed: {}", e)))?;
+            .map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("Slack postMessage failed: {}", e),
+            })?;
 
-        let slack_resp: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| KittypawError::Llm(format!("Failed to parse Slack response: {}", e)))?;
+        let slack_resp: serde_json::Value = resp.json().await.map_err(|e| KittypawError::Llm {
+            kind: kittypaw_core::error::LlmErrorKind::Other,
+            message: format!("Failed to parse Slack response: {}", e),
+        })?;
 
         if !slack_resp
             .get("ok")
@@ -273,10 +278,10 @@ impl Channel for SlackChannel {
                 .get("error")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown error");
-            return Err(KittypawError::Llm(format!(
-                "Slack postMessage error: {}",
-                err
-            )));
+            return Err(KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("Slack postMessage error: {}", err),
+            });
         }
 
         Ok(())

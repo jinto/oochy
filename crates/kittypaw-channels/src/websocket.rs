@@ -10,7 +10,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use futures::{sink::SinkExt, stream::StreamExt};
-use kittypaw_core::error::{KittypawError, Result};
+use kittypaw_core::error::{KittypawError, LlmErrorKind, Result};
 use kittypaw_core::types::{Event, EventType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -82,7 +82,10 @@ impl Channel for WebSocketChannel {
 
         axum::serve(listener, app)
             .await
-            .map_err(|e| KittypawError::Llm(format!("WebSocket server error: {}", e)))?;
+            .map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("WebSocket server error: {}", e),
+            })?;
 
         Ok(())
     }
@@ -156,7 +159,10 @@ impl ServeWebSocketChannel {
         if let Some(tx) = self.sessions.get(session_id) {
             tx.send(text.to_string())
                 .await
-                .map_err(|_| KittypawError::Llm(format!("Session {} disconnected", session_id)))?;
+                .map_err(|_| KittypawError::Llm {
+                    kind: LlmErrorKind::Other,
+                    message: format!("Session {} disconnected", session_id),
+                })?;
         } else {
             warn!("No active WebSocket session for id={}", session_id);
         }

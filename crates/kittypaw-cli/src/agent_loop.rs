@@ -86,10 +86,8 @@ pub async fn run_agent_loop(
 
     tracing::info!(phase = ?LoopPhase::Init, agent_id = %agent_id, "agent state ready");
 
-    // Build prompt messages
+    // Build event text and persist user turn
     let event_text = format_event(&event);
-    let messages = build_prompt(&state, &event_text);
-    tracing::info!(phase = ?LoopPhase::Prompt, agent_id = %agent_id, message_count = messages.len(), "prompt built");
 
     // Add user turn
     let user_turn = ConversationTurn {
@@ -105,18 +103,27 @@ pub async fn run_agent_loop(
         s.add_turn(&agent_id, &user_turn)?;
     }
 
-    // Generate code with retry loop
+    // Generate code with retry loop — each attempt uses progressively tighter compaction
     let mut last_error: Option<String> = None;
-    let mut retry_messages = messages.clone();
 
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
             tracing::info!("Retry attempt {attempt}/{MAX_RETRIES}");
         }
 
+        // Build prompt fresh for this attempt with the appropriate compaction level
+        let compaction = crate::compaction::compaction_for_attempt(attempt);
+        let mut messages = build_prompt(&state, &event_text, &compaction);
+        tracing::info!(
+            phase = ?LoopPhase::Prompt,
+            attempt,
+            recent_window = compaction.recent_window,
+            "prompt built with compaction"
+        );
+
         // If we had an error, append it as feedback
         if let Some(ref err) = last_error {
-            retry_messages.push(LlmMessage {
+            messages.push(LlmMessage {
                 role: Role::User,
                 content: format!(
                     "Your previous code had an error:\n{err}\n\nPlease fix the code and try again."
@@ -125,16 +132,51 @@ pub async fn run_agent_loop(
         }
 
         // Call LLM
-        let code = if let Some(ref cb) = on_token {
+        let llm_result = if let Some(ref cb) = on_token {
             provider
-                .generate_stream(&retry_messages, cb.clone())
+                .generate_stream(&messages, cb.clone())
                 .instrument(info_span!("llm_generate"))
-                .await?
+                .await
         } else {
             provider
-                .generate(&retry_messages)
+                .generate(&messages)
                 .instrument(info_span!("llm_generate"))
-                .await?
+                .await
+        };
+
+        let code = match llm_result {
+            Ok(c) => c,
+            Err(kittypaw_core::error::KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::TokenLimit,
+                ref message,
+            }) => {
+                tracing::warn!(
+                    attempt,
+                    "Token limit hit, retrying with tighter compaction: {message}"
+                );
+                last_error = Some(message.clone());
+                continue;
+            }
+            Err(kittypaw_core::error::KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::RateLimit,
+                ref message,
+            }) => {
+                tracing::warn!(
+                    attempt,
+                    "Rate limit hit, sleeping 2s then retrying: {message}"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                last_error = Some(message.clone());
+                continue;
+            }
+            Err(kittypaw_core::error::KittypawError::Llm { ref message, .. }) => {
+                tracing::error!(attempt, "LLM error (non-retryable): {message}");
+                return Err(kittypaw_core::error::KittypawError::Llm {
+                    kind: kittypaw_core::error::LlmErrorKind::Other,
+                    message: message.clone(),
+                });
+            }
+            Err(e) => return Err(e),
         };
         tracing::debug!("Generated JS ({} chars)", code.len());
         tracing::info!(phase = ?LoopPhase::Generate, agent_id = %agent_id, code_len = code.len(), attempt, "code generated");
@@ -231,12 +273,6 @@ pub async fn run_agent_loop(
         tracing::warn!("Execution error (attempt {attempt}): {err_msg}");
         tracing::info!(phase = ?LoopPhase::Retry, agent_id = %agent_id, attempt, error = %err_msg, "execution failed, retrying");
         last_error = Some(err_msg);
-
-        // Add the failed attempt as assistant message for context
-        retry_messages.push(LlmMessage {
-            role: Role::Assistant,
-            content: code,
-        });
     }
 
     // All retries exhausted
@@ -261,8 +297,12 @@ pub async fn run_agent_loop(
     )))
 }
 
-fn build_prompt(state: &AgentState, event_text: &str) -> Vec<LlmMessage> {
-    use crate::compaction::{compact_turns, CompactionConfig, CompactionMode};
+fn build_prompt(
+    state: &AgentState,
+    event_text: &str,
+    config: &crate::compaction::CompactionConfig,
+) -> Vec<LlmMessage> {
+    use crate::compaction::{compact_turns, CompactionMode};
 
     let mut messages = vec![LlmMessage {
         role: Role::System,
@@ -270,11 +310,7 @@ fn build_prompt(state: &AgentState, event_text: &str) -> Vec<LlmMessage> {
     }];
 
     // Add compacted conversation history (3-stage: summary / truncated / full)
-    let compacted = compact_turns(
-        &state.turns,
-        &CompactionConfig::default(),
-        &CompactionMode::AgentLoop,
-    );
+    let compacted = compact_turns(&state.turns, config, &CompactionMode::AgentLoop);
     messages.extend(compacted);
 
     // Current event

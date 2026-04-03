@@ -1,9 +1,21 @@
 use thiserror::Error;
 
+/// Classifies the failure mode of an LLM API call so callers can apply
+/// appropriate retry or fallback strategies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LlmErrorKind {
+    /// HTTP 429 or provider-level rate limit response.
+    RateLimit,
+    /// HTTP 400 with a context/token length error in the response body.
+    TokenLimit,
+    /// Any other LLM error.
+    Other,
+}
+
 #[derive(Error, Debug)]
 pub enum KittypawError {
-    #[error("LLM error: {0}")]
-    Llm(String),
+    #[error("LLM error ({kind:?}): {message}")]
+    Llm { kind: LlmErrorKind, message: String },
 
     #[error("Sandbox error: {0}")]
     Sandbox(String),
@@ -38,6 +50,30 @@ pub enum KittypawError {
 }
 
 pub type Result<T> = std::result::Result<T, KittypawError>;
+
+impl KittypawError {
+    /// Returns `true` if this is an LLM rate-limit error (HTTP 429).
+    pub fn is_rate_limit(&self) -> bool {
+        matches!(
+            self,
+            KittypawError::Llm {
+                kind: LlmErrorKind::RateLimit,
+                ..
+            }
+        )
+    }
+
+    /// Returns `true` if this is an LLM token/context-length limit error.
+    pub fn is_token_limit(&self) -> bool {
+        matches!(
+            self,
+            KittypawError::Llm {
+                kind: LlmErrorKind::TokenLimit,
+                ..
+            }
+        )
+    }
+}
 
 #[cfg(feature = "registry")]
 impl From<reqwest::Error> for KittypawError {

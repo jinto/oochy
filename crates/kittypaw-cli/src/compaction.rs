@@ -136,6 +136,23 @@ fn summarise_old_turns(turns: &[ConversationTurn]) -> LlmMessage {
     }
 }
 
+/// Returns progressively tighter compaction config based on retry attempt.
+pub fn compaction_for_attempt(attempt: usize) -> CompactionConfig {
+    match attempt {
+        0 => CompactionConfig::default(), // 20 recent, 30 middle
+        1 => CompactionConfig {
+            recent_window: 10,
+            middle_window: 10,
+            truncate_len: 50,
+        },
+        _ => CompactionConfig {
+            recent_window: 5,
+            middle_window: 0,
+            truncate_len: 50,
+        },
+    }
+}
+
 /// Compact conversation turns into `LlmMessage`s using 3-stage compaction.
 ///
 /// Stages:

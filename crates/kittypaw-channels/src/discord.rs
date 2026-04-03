@@ -46,7 +46,10 @@ impl Channel for DiscordChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| KittypawError::Llm(format!("Discord send message failed: {}", e)))?;
+            .map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("Discord send message failed: {}", e),
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -54,10 +57,10 @@ impl Channel for DiscordChannel {
                 .text()
                 .await
                 .unwrap_or_else(|_| "unknown error".to_string());
-            return Err(KittypawError::Llm(format!(
-                "Discord API error {}: {}",
-                status, body_text
-            )));
+            return Err(KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("Discord API error {}: {}", status, body_text),
+            });
         }
 
         Ok(())

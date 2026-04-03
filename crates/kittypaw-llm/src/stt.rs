@@ -33,7 +33,10 @@ impl WhisperClient {
         let file_part = reqwest::multipart::Part::bytes(audio_data.to_vec())
             .file_name(filename)
             .mime_str(&mime)
-            .map_err(|e| KittypawError::Llm(format!("MIME type error: {e}")))?;
+            .map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("MIME type error: {e}"),
+            })?;
 
         let mut form = reqwest::multipart::Form::new()
             .part("file", file_part)
@@ -50,20 +53,24 @@ impl WhisperClient {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| KittypawError::Llm(format!("HTTP error: {e}")))?;
+            .map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("HTTP error: {e}"),
+            })?;
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(KittypawError::Llm(format!(
-                "Whisper API error {status}: {body}"
-            )));
+            return Err(KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("Whisper API error {status}: {body}"),
+            });
         }
 
-        let body: WhisperResponse = response
-            .json()
-            .await
-            .map_err(|e| KittypawError::Llm(format!("Response parse error: {e}")))?;
+        let body: WhisperResponse = response.json().await.map_err(|e| KittypawError::Llm {
+            kind: kittypaw_core::error::LlmErrorKind::Other,
+            message: format!("Response parse error: {e}"),
+        })?;
 
         Ok(body.text)
     }

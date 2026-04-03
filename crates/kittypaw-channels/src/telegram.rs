@@ -175,17 +175,25 @@ impl Channel for TelegramChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| KittypawError::Llm(format!("Telegram sendMessage failed: {}", e)))?;
+            .map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("Telegram sendMessage failed: {}", e),
+            })?;
 
-        let tg_resp: TelegramResponse<serde_json::Value> = resp.json().await.map_err(|e| {
-            KittypawError::Llm(format!("Failed to parse sendMessage response: {}", e))
-        })?;
+        let tg_resp: TelegramResponse<serde_json::Value> =
+            resp.json().await.map_err(|e| KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!("Failed to parse sendMessage response: {}", e),
+            })?;
 
         if !tg_resp.ok {
-            return Err(KittypawError::Llm(format!(
-                "Telegram sendMessage error: {}",
-                tg_resp.description.unwrap_or_default()
-            )));
+            return Err(KittypawError::Llm {
+                kind: kittypaw_core::error::LlmErrorKind::Other,
+                message: format!(
+                    "Telegram sendMessage error: {}",
+                    tg_resp.description.unwrap_or_default()
+                ),
+            });
         }
 
         Ok(())

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use kittypaw_core::error::{KittypawError, Result};
+use kittypaw_core::error::{KittypawError, LlmErrorKind, Result};
 use kittypaw_core::types::LlmMessage;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -141,14 +141,20 @@ impl LlmProvider for OpenAiProvider {
                 .json(&request)
                 .send()
                 .await
-                .map_err(|e| KittypawError::Llm(format!("HTTP error: {e}")))?;
+                .map_err(|e| KittypawError::Llm {
+                    kind: LlmErrorKind::Other,
+                    message: format!("HTTP error: {e}"),
+                })?;
 
             let status = response.status();
 
             if status == 429 {
                 retries += 1;
                 if retries > max_retries {
-                    return Err(KittypawError::Llm("Rate limited after max retries".into()));
+                    return Err(KittypawError::Llm {
+                        kind: LlmErrorKind::RateLimit,
+                        message: "Rate limited after max retries".into(),
+                    });
                 }
                 let delay = std::time::Duration::from_millis(1000 * 2u64.pow(retries));
                 tracing::warn!("Rate limited, retrying in {:?}", delay);
@@ -159,9 +165,10 @@ impl LlmProvider for OpenAiProvider {
             if status.is_server_error() {
                 retries += 1;
                 if retries > max_retries {
-                    return Err(KittypawError::Llm(format!(
-                        "Server error {status} after max retries"
-                    )));
+                    return Err(KittypawError::Llm {
+                        kind: LlmErrorKind::Other,
+                        message: format!("Server error {status} after max retries"),
+                    });
                 }
                 let delay = std::time::Duration::from_millis(1000 * 2u64.pow(retries));
                 tracing::warn!("Server error {status}, retrying in {:?}", delay);
@@ -171,13 +178,26 @@ impl LlmProvider for OpenAiProvider {
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
-                return Err(KittypawError::Llm(format!("API error {status}: {body}")));
+                let kind = if status == 400
+                    && (body.contains("context_length_exceeded")
+                        || body.contains("context_window")
+                        || body.contains("too many tokens")
+                        || body.contains("max_tokens"))
+                {
+                    LlmErrorKind::TokenLimit
+                } else {
+                    LlmErrorKind::Other
+                };
+                return Err(KittypawError::Llm {
+                    kind,
+                    message: format!("API error {status}: {body}"),
+                });
             }
 
-            let body: OpenAiResponse = response
-                .json()
-                .await
-                .map_err(|e| KittypawError::Llm(format!("Response parse error: {e}")))?;
+            let body: OpenAiResponse = response.json().await.map_err(|e| KittypawError::Llm {
+                kind: LlmErrorKind::Other,
+                message: format!("Response parse error: {e}"),
+            })?;
 
             let text = body
                 .choices
@@ -216,12 +236,30 @@ impl LlmProvider for OpenAiProvider {
             .json(&request)
             .send()
             .await
-            .map_err(|e| KittypawError::Llm(format!("HTTP error: {e}")))?;
+            .map_err(|e| KittypawError::Llm {
+                kind: LlmErrorKind::Other,
+                message: format!("HTTP error: {e}"),
+            })?;
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(KittypawError::Llm(format!("API error {status}: {body}")));
+            let kind = if status == 429 {
+                LlmErrorKind::RateLimit
+            } else if status == 400
+                && (body.contains("context_length_exceeded")
+                    || body.contains("context_window")
+                    || body.contains("too many tokens")
+                    || body.contains("max_tokens"))
+            {
+                LlmErrorKind::TokenLimit
+            } else {
+                LlmErrorKind::Other
+            };
+            return Err(KittypawError::Llm {
+                kind,
+                message: format!("API error {status}: {body}"),
+            });
         }
 
         let mut accumulated = String::new();
@@ -229,9 +267,14 @@ impl LlmProvider for OpenAiProvider {
         let mut line_buf = String::new();
 
         while let Some(chunk) = byte_stream.next().await {
-            let chunk = chunk.map_err(|e| KittypawError::Llm(format!("Stream error: {e}")))?;
-            let text = std::str::from_utf8(&chunk)
-                .map_err(|e| KittypawError::Llm(format!("UTF-8 decode error: {e}")))?;
+            let chunk = chunk.map_err(|e| KittypawError::Llm {
+                kind: LlmErrorKind::Other,
+                message: format!("Stream error: {e}"),
+            })?;
+            let text = std::str::from_utf8(&chunk).map_err(|e| KittypawError::Llm {
+                kind: LlmErrorKind::Other,
+                message: format!("UTF-8 decode error: {e}"),
+            })?;
 
             line_buf.push_str(text);
 
