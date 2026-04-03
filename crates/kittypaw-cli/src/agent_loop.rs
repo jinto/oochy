@@ -163,9 +163,10 @@ pub async fn run_agent_loop(
             }) => {
                 tracing::warn!(
                     attempt,
-                    "Rate limit hit, sleeping 2s then retrying: {message}"
+                    "Rate limit hit, sleeping 2s then retrying same prompt: {message}"
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                // Keep last_error so retry-exhausted path reports the real reason
                 last_error = Some(message.clone());
                 continue;
             }

@@ -152,16 +152,7 @@ impl LlmProvider for ClaudeProvider {
 
             if !status.is_success() {
                 let body = response.text().await.unwrap_or_default();
-                let kind = if status == 400
-                    && (body.contains("context_length_exceeded")
-                        || body.contains("context_window")
-                        || body.contains("too many tokens")
-                        || body.contains("max_tokens"))
-                {
-                    LlmErrorKind::TokenLimit
-                } else {
-                    LlmErrorKind::Other
-                };
+                let kind = LlmErrorKind::from_http_response(status.as_u16(), &body);
                 return Err(KittypawError::Llm {
                     kind,
                     message: format!("API error {status}: {body}"),
@@ -233,18 +224,7 @@ impl LlmProvider for ClaudeProvider {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            let kind = if status == 429 {
-                LlmErrorKind::RateLimit
-            } else if status == 400
-                && (body.contains("context_length_exceeded")
-                    || body.contains("context_window")
-                    || body.contains("too many tokens")
-                    || body.contains("max_tokens"))
-            {
-                LlmErrorKind::TokenLimit
-            } else {
-                LlmErrorKind::Other
-            };
+            let kind = LlmErrorKind::from_http_response(status.as_u16(), &body);
             return Err(KittypawError::Llm {
                 kind,
                 message: format!("API error {status}: {body}"),

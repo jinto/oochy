@@ -12,6 +12,26 @@ pub enum LlmErrorKind {
     Other,
 }
 
+const TOKEN_LIMIT_INDICATORS: &[&str] = &[
+    "context_length_exceeded",
+    "context_window",
+    "too many tokens",
+    "max_tokens",
+];
+
+impl LlmErrorKind {
+    /// Classify an HTTP error response into a specific LLM error kind.
+    pub fn from_http_response(status: u16, body: &str) -> Self {
+        if status == 429 {
+            Self::RateLimit
+        } else if status == 400 && TOKEN_LIMIT_INDICATORS.iter().any(|s| body.contains(s)) {
+            Self::TokenLimit
+        } else {
+            Self::Other
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum KittypawError {
     #[error("LLM error ({kind:?}): {message}")]
