@@ -7,7 +7,6 @@ use kittypaw_core::error::Result;
 use kittypaw_core::registry::RegistryEntry;
 use kittypaw_core::types::{
     now_timestamp, AgentState, ConversationTurn, Event, EventType, LlmMessage, LoopPhase, Role,
-    TransitionReason,
 };
 use kittypaw_llm::provider::LlmProvider;
 use kittypaw_sandbox::sandbox::Sandbox;
