@@ -106,6 +106,7 @@ pub async fn resolve_skill_call(
     config: &kittypaw_core::config::Config,
     store: &Arc<Mutex<Store>>,
     checker: Option<&Arc<std::sync::Mutex<CapabilityChecker>>>,
+    on_permission: Option<&PermissionCallback>,
 ) -> String {
     if let Some(cap) = checker {
         match cap.lock() {
@@ -124,8 +125,12 @@ pub async fn resolve_skill_call(
         }
     }
 
-    // File calls are synchronous
+    // File calls are synchronous — but require an async permission check first
     if call.skill_name == "File" {
+        if let Err(msg) = check_file_permission(call, on_permission).await {
+            return serde_json::to_string(&serde_json::json!({"error": msg}))
+                .unwrap_or_else(|_| "null".to_string());
+        }
         return match execute_file(call, None) {
             Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| "null".to_string()),
             Err(e) => serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
@@ -170,7 +175,7 @@ pub async fn resolve_skill_call(
         None,
         &llm_call_count,
         None,
-        None, // on_permission: auto-allow (no UI in resolver path)
+        on_permission,
     )
     .await;
 
@@ -291,11 +296,17 @@ async fn execute_single_call(
     call: &SkillCall,
     allowed_hosts: &[String],
     config: &kittypaw_core::config::Config,
-    _skill_context: Option<&str>,
+    skill_context: Option<&str>,
     llm_call_count: &AtomicU32,
     model_override: Option<&str>,
     on_permission: Option<&PermissionCallback>,
 ) -> SkillResult {
+    tracing::debug!(
+        skill = %call.skill_name,
+        method = %call.method,
+        context = ?skill_context,
+        "executing skill call"
+    );
     let result = match call.skill_name.as_str() {
         "Telegram" => execute_telegram(call, config).await,
         "Slack" => execute_slack(call, config).await,
@@ -342,6 +353,22 @@ fn resolve_channel_token(
         })
 }
 
+/// Extract and validate chat_id (args[0]) and a second required arg (args[1]).
+/// Returns the two values or an error naming the missing field.
+fn require_telegram_args<'a>(call: &'a SkillCall, second_name: &str) -> Result<(&'a str, &'a str)> {
+    let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+    let second = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+    if chat_id.is_empty() {
+        return Err(KittypawError::Skill("Telegram: missing chat_id".into()));
+    }
+    if second.is_empty() {
+        return Err(KittypawError::Skill(format!(
+            "Telegram: missing {second_name}"
+        )));
+    }
+    Ok((chat_id, second))
+}
+
 async fn execute_telegram(
     call: &SkillCall,
     config: &kittypaw_core::config::Config,
@@ -367,8 +394,7 @@ async fn execute_telegram(
     match call.method.as_str() {
         "sendMessage" => {
             // ABI: Telegram.sendMessage(chatId, text)
-            let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
-            let text = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let (chat_id, text) = require_telegram_args(call, "text")?;
 
             let url = format!("https://api.telegram.org/bot{bot_token}/sendMessage");
             let resp = client
@@ -400,8 +426,7 @@ async fn execute_telegram(
         }
         "sendPhoto" => {
             // ABI: Telegram.sendPhoto(chatId, photoUrl)
-            let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
-            let photo_url = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let (chat_id, photo_url) = require_telegram_args(call, "photo_url")?;
 
             let url = format!("https://api.telegram.org/bot{bot_token}/sendPhoto");
             let resp = client
@@ -432,8 +457,7 @@ async fn execute_telegram(
         }
         "sendDocument" => {
             // ABI: Telegram.sendDocument(chatId, fileUrl, caption?)
-            let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
-            let file_url = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let (chat_id, file_url) = require_telegram_args(call, "file_url")?;
             let caption = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
 
             let url = format!("https://api.telegram.org/bot{bot_token}/sendDocument");
@@ -918,11 +942,19 @@ fn execute_storage(
         "set" => {
             let key = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
             let value = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            if key.is_empty() {
+                return Err(KittypawError::Skill("Storage.set: key is required".into()));
+            }
             store.storage_set(namespace, key, value)?;
             Ok(serde_json::json!({ "ok": true }))
         }
         "delete" => {
             let key = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+            if key.is_empty() {
+                return Err(KittypawError::Skill(
+                    "Storage.delete: key is required".into(),
+                ));
+            }
             store.storage_delete(namespace, key)?;
             Ok(serde_json::json!({ "ok": true }))
         }
@@ -1236,6 +1268,48 @@ mod tests {
         }
     }
 
+    fn make_telegram_call(method: &str, args: Vec<serde_json::Value>) -> SkillCall {
+        SkillCall {
+            skill_name: "Telegram".to_string(),
+            method: method.to_string(),
+            args,
+        }
+    }
+
+    fn telegram_config() -> kittypaw_core::config::Config {
+        let mut config = kittypaw_core::config::Config::default();
+        config.channels.push(kittypaw_core::config::ChannelConfig {
+            channel_type: kittypaw_core::config::ChannelType::Telegram,
+            token: "dummy-token".to_string(),
+            bind_addr: None,
+        });
+        config
+    }
+
+    #[tokio::test]
+    async fn test_telegram_send_message_empty_chat_id() {
+        let call = make_telegram_call("sendMessage", vec![json_str(""), json_str("hello")]);
+        let config = telegram_config();
+
+        let result = execute_telegram(&call, &config).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("missing chat_id"), "error was: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_telegram_send_message_empty_text() {
+        let call = make_telegram_call("sendMessage", vec![json_str("12345"), json_str("")]);
+        let config = telegram_config();
+
+        let result = execute_telegram(&call, &config).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("missing text"), "error was: {err}");
+    }
+
     #[test]
     fn test_storage_set_and_get() {
         let path = temp_db_path();
@@ -1309,6 +1383,36 @@ mod tests {
         let call = make_call("delete", vec![json_str("nokey")]);
         let result = execute_storage(&call, &store, None).unwrap();
         assert_eq!(result, serde_json::json!({ "ok": true }));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_storage_set_empty_key() {
+        let path = temp_db_path();
+        let store = open_store(&path);
+
+        let call = make_call("set", vec![json_str(""), json_str("value")]);
+        let result = execute_storage(&call, &store, None);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("key is required"), "error was: {err}");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_storage_delete_empty_key() {
+        let path = temp_db_path();
+        let store = open_store(&path);
+
+        let call = make_call("delete", vec![json_str("")]);
+        let result = execute_storage(&call, &store, None);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("key is required"), "error was: {err}");
 
         let _ = std::fs::remove_file(&path);
     }
@@ -1552,5 +1656,36 @@ mod tests {
             "<p>Before</p><script>alert('xss')</script><style>.x{color:red}</style><p>After</p>";
         let text = strip_html_tags(html);
         assert_eq!(text, "Before After");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_skill_call_file_denied_by_permission() {
+        let path = temp_db_path();
+        let store = Arc::new(tokio::sync::Mutex::new(open_store(&path)));
+        let config = kittypaw_core::config::Config::default();
+
+        let call = SkillCall {
+            skill_name: "File".to_string(),
+            method: "write".to_string(),
+            args: vec![
+                serde_json::Value::String("test.txt".into()),
+                serde_json::Value::String("content".into()),
+            ],
+        };
+
+        let deny_cb: PermissionCallback = Arc::new(|_req| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let _ = tx.send(PermissionDecision::Deny);
+            rx
+        });
+
+        let result = resolve_skill_call(&call, &config, &store, None, Some(&deny_cb)).await;
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(
+            parsed.get("error").is_some(),
+            "File.write should be denied when permission callback denies"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 }

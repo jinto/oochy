@@ -162,6 +162,15 @@
 - [x] sandbox file/network permission popup wiring 완료 (`AskUser`, `AllowOnce`, `AllowPermanent`)
 - [x] 기능 플래그 / kill switch 레이어 (background agents, model routing, experimental channels)
 - [x] 실패 복구 정책 고도화: token budget 초과 시 compact 후 재시도, 프롬프트 축소, 경량 모델 fallback
+- [x] 권한 우회 경로 제거: `resolve_skill_call`에 permission callback 전달, headless auto-allow 차단
+- [x] 스킬 입력 검증 일관성: Telegram sendMessage/sendPhoto/sendDocument + Storage.set/delete 빈 인자 조기 차단
+- [x] TransitionReason 실사용: agent_loop 전 단계에 구조화된 transition reason 로그 연결
+- [ ] 스킬 결과 크기 제한 (대용량 결과 디스크 저장, Claude Code의 Tool Result Budget 참고)
+- [ ] 토큰 추정 기반 컨텍스트 예산 (문자 기반 → 토큰 기반 compaction)
+- [ ] 스킬 에러 분류 + 단위 재시도 (Transient/Permanent 분류, HTTP 5xx 재시도)
+- [ ] CancellationToken + 전체 에이전트 루프 타임아웃
+- [ ] Circuit Breaker (압축 3연속 실패 시 중단)
+- [ ] Safe/Unsafe 스킬 병렬화 파티셔닝 (읽기 병렬, 쓰기 순차)
 
 ### 기타 백로그
 - [ ] 웹 검색 프로바이더 폴백 체인 (Exa → DuckDuckGo)

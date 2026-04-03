@@ -6,7 +6,7 @@ use kittypaw_core::error::{KittypawError, Result};
 use kittypaw_core::permission::{PermissionDecision, PermissionRequest};
 use kittypaw_core::types::{
     now_timestamp, AgentState, ConversationTurn, Event, EventType, ExecutionResult, LlmMessage,
-    LoopPhase, Role,
+    LoopPhase, Role, TransitionReason,
 };
 use kittypaw_llm::provider::LlmProvider;
 use kittypaw_sandbox::sandbox::Sandbox;
@@ -83,7 +83,13 @@ pub async fn run_agent_loop(
         }
     };
 
-    tracing::info!(phase = ?LoopPhase::Init, agent_id = %agent_id, "agent state ready");
+    let reason = TransitionReason::StateReady;
+    tracing::info!(
+        phase = ?LoopPhase::Init,
+        agent_id = %agent_id,
+        transition = ?reason,
+        "agent state ready"
+    );
 
     // Build event text and persist user turn
     let event_text = format_event(&event);
@@ -126,10 +132,14 @@ pub async fn run_agent_loop(
             crate::compaction::compaction_for_attempt(attempt)
         };
         let mut messages = build_prompt(&state, &event_text, &compaction);
+        let reason = TransitionReason::PromptBuilt {
+            message_count: messages.len(),
+        };
         tracing::info!(
             phase = ?LoopPhase::Prompt,
             attempt,
             recent_window = compaction.recent_window,
+            transition = ?reason,
             "prompt built with compaction"
         );
 
@@ -192,7 +202,16 @@ pub async fn run_agent_loop(
             Err(e) => return Err(e),
         };
         tracing::debug!("Generated JS ({} chars)", code.len());
-        tracing::info!(phase = ?LoopPhase::Generate, agent_id = %agent_id, code_len = code.len(), attempt, "code generated");
+        let reason = TransitionReason::CodeGenerated {
+            code_len: code.len(),
+        };
+        tracing::info!(
+            phase = ?LoopPhase::Generate,
+            agent_id = %agent_id,
+            attempt,
+            transition = ?reason,
+            "code generated"
+        );
 
         // Execute in sandbox
         let context = serde_json::json!({
@@ -231,13 +250,17 @@ pub async fn run_agent_loop(
                 let store = Arc::clone(&store_for_resolver);
                 let config = Arc::clone(&config_for_resolver);
                 let checker = checker_for_resolver.clone();
-                let _on_permission = permission_for_resolver.clone();
+                let on_perm = permission_for_resolver.clone();
                 Box::pin(async move {
+                    let perm_ref = on_perm
+                        .as_ref()
+                        .map(|p| p as &crate::skill_executor::PermissionCallback);
                     crate::skill_executor::resolve_skill_call(
                         &call,
                         &config,
                         &store,
                         checker.as_ref(),
+                        perm_ref,
                     )
                     .await
                 })
@@ -264,7 +287,16 @@ pub async fn run_agent_loop(
                 exec_result.output.clone()
             };
 
-            tracing::info!(phase = ?LoopPhase::Finish, agent_id = %agent_id, output_len = output.len(), skill_calls = exec_result.skill_calls.len(), "execution success");
+            let reason = TransitionReason::ExecutionSuccess {
+                output_len: output.len(),
+                skill_calls: exec_result.skill_calls.len(),
+            };
+            tracing::info!(
+                phase = ?LoopPhase::Finish,
+                agent_id = %agent_id,
+                transition = ?reason,
+                "execution success"
+            );
 
             let assistant_turn = ConversationTurn {
                 role: Role::Assistant,
@@ -286,13 +318,30 @@ pub async fn run_agent_loop(
         // Error — retry with feedback
         let err_msg = exec_result.error.unwrap_or("unknown error".into());
         tracing::warn!("Execution error (attempt {attempt}): {err_msg}");
-        tracing::info!(phase = ?LoopPhase::Retry, agent_id = %agent_id, attempt, error = %err_msg, "execution failed, retrying");
+        let reason = TransitionReason::ExecutionFailed {
+            error: err_msg.clone(),
+            attempt,
+        };
+        tracing::info!(
+            phase = ?LoopPhase::Retry,
+            agent_id = %agent_id,
+            transition = ?reason,
+            "execution failed, retrying"
+        );
         last_error = Some(err_msg);
     }
 
     // All retries exhausted
     let err_msg = last_error.unwrap_or("unknown error".into());
-    tracing::info!(phase = ?LoopPhase::Finish, agent_id = %agent_id, error = %err_msg, "retries exhausted");
+    let reason = TransitionReason::RetriesExhausted {
+        error: err_msg.clone(),
+    };
+    tracing::info!(
+        phase = ?LoopPhase::Finish,
+        agent_id = %agent_id,
+        transition = ?reason,
+        "retries exhausted"
+    );
     let assistant_turn = ConversationTurn {
         role: Role::Assistant,
         content: format!("Error after {MAX_RETRIES} retries: {err_msg}"),
