@@ -180,19 +180,6 @@ impl WorkspaceManager {
         Ok(())
     }
 
-    /// Iterates over (workspace_id, workspace) pairs.
-    pub fn workspaces_iter(&self) -> impl Iterator<Item = (&str, &Workspace)> {
-        self.workspaces.iter().map(|(k, v)| (k.as_str(), v))
-    }
-
-    /// Returns a clone of a stored change by ID.
-    pub fn get_change(&self, change_id: &str) -> Result<FileChange> {
-        self.changes
-            .get(change_id)
-            .cloned()
-            .ok_or_else(|| KittypawError::Sandbox(format!("Change not found: {change_id}")))
-    }
-
     /// Marks a pending change as Rejected without writing to disk.
     pub fn reject_change(&mut self, change_id: &str) -> Result<()> {
         let change = self

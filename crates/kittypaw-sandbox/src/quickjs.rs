@@ -9,6 +9,21 @@ use rquickjs::{async_with, AsyncContext, AsyncRuntime, Function, Object, Value};
 
 use crate::backend::SkillResolver;
 
+const MAX_SKILL_CALLS: usize = 100;
+
+/// Serialize a JS `Value` to `serde_json::Value` using the context embedded in the value.
+/// Using `v.ctx()` avoids a separate `Ctx<'js>` parameter, which would cause lifetime
+/// variance conflicts when used in a `Rest<Value<'_>>` closure.
+fn js_value_to_json(v: &Value<'_>) -> serde_json::Value {
+    v.ctx()
+        .json_stringify(v.clone())
+        .ok()
+        .flatten()
+        .and_then(|s| s.to_string().ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::Value::Null)
+}
+
 pub(crate) const KNOWN_SKILLS: &[(&str, &[&str])] = &[
     (
         "Telegram",
@@ -86,22 +101,32 @@ pub(crate) fn run_child_async(
                         let resolver = resolver.clone();
                         let func = Function::new(
                             ctx.clone(),
-                            Async(move |args: Rest<String>| {
+                            Async(move |args: Rest<Value<'_>>| {
                                 let skill = skill.clone();
                                 let meth = meth.clone();
                                 let cc = Arc::clone(&cc);
                                 let resolver = resolver.clone();
+                                // Serialize JS values to serde_json::Value before async move,
+                                // while we still hold the JS context reference.
+                                // js_value_to_json uses v.ctx() internally, avoiding a
+                                // separate Ctx<'_> parameter that would cause lifetime conflicts.
+                                let json_args: Vec<serde_json::Value> = args.0.iter()
+                                    .map(js_value_to_json)
+                                    .collect();
                                 async move {
-                                    let json_args: Vec<serde_json::Value> = args.0.iter()
-                                        .map(|s| serde_json::from_str(s).unwrap_or(serde_json::Value::String(s.clone())))
-                                        .collect();
+                                    {
+                                        let mut guard = cc.lock().unwrap();
+                                        if guard.len() >= MAX_SKILL_CALLS {
+                                            return Err(rquickjs::Error::Exception);
+                                        }
+                                        let call = SkillCall { skill_name: skill.clone(), method: meth.clone(), args: json_args.clone() };
+                                        guard.push(call);
+                                    }
                                     let call = SkillCall { skill_name: skill, method: meth, args: json_args };
-                                    cc.lock().unwrap().push(call.clone());
-
                                     if let Some(ref resolve) = resolver {
-                                        resolve(call).await
+                                        Ok(resolve(call).await)
                                     } else {
-                                        "null".to_string()
+                                        Ok("null".to_string())
                                     }
                                 }
                             }),

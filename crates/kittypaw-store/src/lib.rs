@@ -51,6 +51,7 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_millis(5000))?;
 
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
         migrations()
             .to_latest(&mut conn)
@@ -114,8 +115,8 @@ impl Store {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn recent_turns(&self, agent_id: &str, n: usize) -> Result<Vec<ConversationTurn>> {
+    #[cfg(test)]
+    fn recent_turns(&self, agent_id: &str, n: usize) -> Result<Vec<ConversationTurn>> {
         let mut stmt = self.conn.prepare(
             "SELECT role, content, code, result, timestamp \
                  FROM conversations WHERE agent_id = ?1 \
@@ -188,24 +189,6 @@ impl Store {
             "INSERT OR REPLACE INTO workspaces (id, name, root_path, last_opened_at) \
                  VALUES (?1, ?2, ?3, datetime('now'))",
             params![id, name, root_path],
-        )?;
-        Ok(())
-    }
-
-    pub fn list_workspaces(&self) -> Result<Vec<(String, String, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, name, root_path FROM workspaces ORDER BY last_opened_at DESC")?;
-        let rows: Vec<(String, String, String)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    pub fn update_last_opened(&self, id: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE workspaces SET last_opened_at = datetime('now') WHERE id = ?1",
-            params![id],
         )?;
         Ok(())
     }
@@ -494,9 +477,30 @@ impl Store {
 
     /// Full-text search across execution history
     pub fn search_executions(&self, query: &str, limit: usize) -> Result<Vec<ExecutionRecord>> {
-        // Wrap in double quotes to treat as phrase search and avoid FTS5 operator injection
-        // (e.g. "-foo", "foo:bar", "(foo)" would otherwise be misinterpreted)
-        let safe_query = format!("\"{}\"", query.replace('"', "\"\""));
+        // Sanitize: keep only alphanumeric, spaces, Korean (Hangul), and basic punctuation.
+        // Strip FTS5 operators (AND, OR, NOT, NEAR, ^, *, :, (, ), -, +, etc.).
+        // Cap at 200 chars. Reject empty input.
+        let sanitized: String = query
+            .chars()
+            .filter(|c| {
+                c.is_alphanumeric()
+                    || *c == ' '
+                    || *c == '.'
+                    || *c == ','
+                    || *c == '!'
+                    || *c == '?'
+                    || ('\u{AC00}'..='\u{D7A3}').contains(c)  // Hangul syllables
+                    || ('\u{1100}'..='\u{11FF}').contains(c)  // Hangul jamo
+                    || ('\u{3130}'..='\u{318F}').contains(c) // Hangul compatibility jamo
+            })
+            .take(200)
+            .collect();
+        let sanitized = sanitized.trim();
+        if sanitized.is_empty() {
+            return Ok(vec![]);
+        }
+        // Wrap as phrase to prevent any remaining operator misinterpretation.
+        let safe_query = format!("\"{}\"", sanitized.replace('"', "\"\""));
         let mut stmt = self.conn.prepare(
             "SELECT e.id, e.skill_id, e.skill_name, e.started_at, e.duration_ms, e.result_summary, e.success, e.retry_count \
              FROM execution_history e \

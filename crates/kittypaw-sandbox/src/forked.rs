@@ -29,8 +29,14 @@ const SEATBELT_PROFILE: &str = r#"
 (allow process*)
 (allow sysctl-read)
 (allow signal)
-(allow mach*)
-(allow ipc*)
+(allow mach-lookup
+    (global-name "com.apple.system.logger")
+    (global-name "com.apple.system.notification_center")
+    (global-name "com.apple.dyld.shared.cache.xpc.1")
+)
+(allow ipc-posix-shm-read-data
+    (ipc-posix-name "apple.shm.notification_center")
+)
 (deny network*)
 "#;
 
@@ -70,6 +76,9 @@ fn apply_seatbelt() -> std::result::Result<(), String> {
     {
         // On Linux, Seatbelt is not available. Landlock support is deferred to v2.
         // The QuickJS VM + fork isolation still provides a security layer.
+        tracing::warn!(
+            "OS-level sandbox not available on this platform; JS code runs without isolation"
+        );
     }
 
     Ok(())

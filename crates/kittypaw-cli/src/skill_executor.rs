@@ -255,7 +255,10 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
         .or_else(|| std::env::var("KITTYPAW_TELEGRAM_TOKEN").ok())
         .ok_or_else(|| KittypawError::Config("Telegram bot token not configured".into()))?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| KittypawError::Skill(format!("Telegram client build error: {e}")))?;
 
     match call.method.as_str() {
         "sendMessage" => {
@@ -274,11 +277,21 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Telegram API error: {e}")))?;
 
+            let status = resp.status();
             let body: serde_json::Value = resp
                 .json()
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Telegram response parse error: {e}")))?;
 
+            if !status.is_success() {
+                let err = body
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                return Err(KittypawError::Skill(format!(
+                    "Telegram sendMessage error {status}: {err}"
+                )));
+            }
             Ok(body)
         }
         "sendPhoto" => {
@@ -297,10 +310,20 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Telegram API error: {e}")))?;
 
+            let status = resp.status();
             let body: serde_json::Value = resp
                 .json()
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Telegram response parse error: {e}")))?;
+            if !status.is_success() {
+                let err = body
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                return Err(KittypawError::Skill(format!(
+                    "Telegram sendPhoto error {status}: {err}"
+                )));
+            }
             Ok(body)
         }
         "sendDocument" => {
@@ -324,10 +347,20 @@ async fn execute_telegram(call: &SkillCall) -> Result<serde_json::Value> {
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Telegram API error: {e}")))?;
 
+            let status = resp.status();
             let body: serde_json::Value = resp
                 .json()
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Telegram response parse error: {e}")))?;
+            if !status.is_success() {
+                let err = body
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                return Err(KittypawError::Skill(format!(
+                    "Telegram sendDocument error {status}: {err}"
+                )));
+            }
             Ok(body)
         }
         _ => Err(KittypawError::CapabilityDenied(format!(
@@ -346,7 +379,10 @@ async fn execute_slack(call: &SkillCall) -> Result<serde_json::Value> {
         .or_else(|| std::env::var("KITTYPAW_SLACK_TOKEN").ok())
         .ok_or_else(|| KittypawError::Config("Slack bot token not configured".into()))?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| KittypawError::Skill(format!("Slack client build error: {e}")))?;
 
     match call.method.as_str() {
         "sendMessage" => {
@@ -405,7 +441,10 @@ async fn execute_discord(call: &SkillCall) -> Result<serde_json::Value> {
         .or_else(|| std::env::var("KITTYPAW_DISCORD_TOKEN").ok())
         .ok_or_else(|| KittypawError::Config("Discord bot token not configured".into()))?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| KittypawError::Skill(format!("Discord client build error: {e}")))?;
 
     match call.method.as_str() {
         "sendMessage" => {
@@ -503,7 +542,11 @@ fn validate_url(url_str: &str, allowed_hosts: &[String]) -> Result<()> {
     }
 
     // Check allowlist if configured
-    if !allowed_hosts.is_empty() && !allowed_hosts.iter().any(|h| host.ends_with(h.as_str())) {
+    if !allowed_hosts.is_empty()
+        && !allowed_hosts
+            .iter()
+            .any(|domain| host == domain.as_str() || host.ends_with(&format!(".{domain}")))
+    {
         return Err(KittypawError::Sandbox(format!(
             "Http: host '{host}' not in allowed_hosts"
         )));
@@ -516,6 +559,7 @@ async fn execute_http(call: &SkillCall, allowed_hosts: &[String]) -> Result<serd
     // Disable redirects to prevent redirect-based SSRF bypass
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| KittypawError::Sandbox(format!("Http client build error: {e}")))?;
     let url = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
@@ -562,6 +606,7 @@ async fn execute_web(call: &SkillCall, allowed_hosts: &[String]) -> Result<serde
     // Disable redirects to prevent SSRF bypass via redirect to internal IPs
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -648,10 +693,18 @@ async fn execute_web(call: &SkillCall, allowed_hosts: &[String]) -> Result<serde
                 .unwrap_or("")
                 .to_string();
 
-            let body = resp
-                .text()
+            // Cap download at 100KB to bound memory usage before any processing
+            const DOWNLOAD_LIMIT: usize = 100 * 1024;
+            let bytes = resp
+                .bytes()
                 .await
                 .map_err(|e| KittypawError::Skill(format!("Web.fetch read error: {e}")))?;
+            let capped = if bytes.len() > DOWNLOAD_LIMIT {
+                &bytes[..DOWNLOAD_LIMIT]
+            } else {
+                &bytes[..]
+            };
+            let body = String::from_utf8_lossy(capped).into_owned();
 
             // Basic HTML to text extraction (strip tags)
             let text = if content_type.contains("html") {
@@ -852,7 +905,10 @@ async fn execute_llm(
         )));
     }
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| KittypawError::Skill(format!("Llm client build error: {e}")))?;
 
     // Route to provider-specific endpoint
     let is_openai_compat = matches!(provider_lower.as_str(), "openai" | "ollama" | "local");
@@ -897,10 +953,23 @@ async fn execute_llm(
             .map_err(|e| KittypawError::Skill(format!("Llm API error: {e}")))?
     };
 
+    let status = resp.status();
     let body: serde_json::Value = resp
         .json()
         .await
         .map_err(|e| KittypawError::Skill(format!("Llm response parse error: {e}")))?;
+
+    if !status.is_success() {
+        let err = body
+            .get("error")
+            .and_then(|v| v.get("message"))
+            .and_then(|v| v.as_str())
+            .or_else(|| body.get("error").and_then(|v| v.as_str()))
+            .unwrap_or("unknown error");
+        return Err(KittypawError::Skill(format!(
+            "Llm API error {status}: {err}"
+        )));
+    }
 
     let text = if is_openai_compat {
         body["choices"]
@@ -978,8 +1047,8 @@ fn validate_file_path(data_dir: &Path, rel_path: &str) -> Result<PathBuf> {
     }
     let rel = rel_path.trim_start_matches('/');
     let full = data_dir.join(rel);
-    // For existing files, canonicalize and check prefix
     if full.exists() {
+        // For existing files, canonicalize and check prefix
         let canonical = full.canonicalize()?;
         let canonical_root = data_dir.canonicalize()?;
         if !canonical.starts_with(&canonical_root) {
@@ -987,8 +1056,27 @@ fn validate_file_path(data_dir: &Path, rel_path: &str) -> Result<PathBuf> {
                 "File: path escapes data directory".into(),
             ));
         }
+        Ok(canonical)
+    } else {
+        // For non-existent files, canonicalize the parent and append filename
+        let parent = full
+            .parent()
+            .ok_or_else(|| KittypawError::Sandbox("File: path has no parent directory".into()))?;
+        let file_name = full
+            .file_name()
+            .ok_or_else(|| KittypawError::Sandbox("File: path has no filename".into()))?;
+        // Parent must exist; if it doesn't, reject to prevent traversal via missing dirs
+        let canonical_parent = parent
+            .canonicalize()
+            .map_err(|_| KittypawError::Sandbox("File: parent directory does not exist".into()))?;
+        let canonical_root = data_dir.canonicalize()?;
+        if !canonical_parent.starts_with(&canonical_root) {
+            return Err(KittypawError::Sandbox(
+                "File: path escapes data directory".into(),
+            ));
+        }
+        Ok(canonical_parent.join(file_name))
     }
-    Ok(full)
 }
 
 fn execute_env(

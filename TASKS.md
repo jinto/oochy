@@ -18,7 +18,7 @@
 - [x] 스킬 Test Run 버튼 (SkillResolver 연동)
 
 ### Foundation 기반 기능 4개 ✅
-- [x] OS keychain 시크릿 관리 (`keyring` crate)
+- [x] 로컬 시크릿 저장소 (`~/.kittypaw/secrets.json`, atomic write)
 - [x] 멀티 프로바이더 LLM (OpenAI + Claude + LlmRegistry)
 - [x] Web.search / Web.fetch 샌드박스 프리미티브
 - [x] 스킬 체이닝 (`[[chain]]` + prev_output 전달)

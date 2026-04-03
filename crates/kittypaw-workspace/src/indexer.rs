@@ -167,59 +167,6 @@ impl FileIndexer {
         Ok(results)
     }
 
-    /// Update a single file in the index.
-    pub fn update_file(&mut self, workspace_root: &Path, rel_path: &str) -> Result<()> {
-        // Remove old entry then re-add
-        self.remove_file(rel_path)?;
-
-        let abs_path = workspace_root.join(rel_path);
-        let metadata = abs_path.metadata().map_err(KittypawError::Io)?;
-        if metadata.len() > MAX_FILE_SIZE {
-            return Ok(());
-        }
-
-        let content = match std::fs::read_to_string(&abs_path) {
-            Ok(c) => c,
-            Err(_) => return Ok(()),
-        };
-
-        let filename = Path::new(rel_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|t| {
-                t.duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .map(|d| d.as_secs().to_string())
-            })
-            .unwrap_or_default();
-
-        let mut writer: IndexWriter = self
-            .index
-            .writer(50_000_000)
-            .map_err(|e| KittypawError::Sandbox(format!("Failed to create writer: {e}")))?;
-
-        let mut doc = TantivyDocument::default();
-        doc.add_text(self.field_path, rel_path);
-        doc.add_text(self.field_filename, &filename);
-        doc.add_text(self.field_content, &content);
-        doc.add_text(self.field_modified, &modified);
-
-        writer
-            .add_document(doc)
-            .map_err(|e| KittypawError::Sandbox(format!("Failed to add document: {e}")))?;
-        writer
-            .commit()
-            .map_err(|e| KittypawError::Sandbox(format!("Failed to commit: {e}")))?;
-
-        Ok(())
-    }
-
     /// Remove a file from the index by path.
     pub fn remove_file(&mut self, rel_path: &str) -> Result<()> {
         let mut writer: IndexWriter = self

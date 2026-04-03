@@ -41,10 +41,6 @@ impl FilePermissionChecker {
         self.session_grants.push(grant);
     }
 
-    pub fn add_permanent_rule(&mut self, rule: FilePermissionRule) {
-        self.rules.push(rule);
-    }
-
     /// Check whether `path` may be accessed with `action`.
     ///
     /// Returns `Allowed`, `Denied`, or `AskUser`.
