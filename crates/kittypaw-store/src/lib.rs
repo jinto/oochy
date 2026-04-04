@@ -40,6 +40,17 @@ pub struct ExecutionRecord {
     pub usage_json: Option<String>,
 }
 
+/// Sum input + output tokens from a usage_json string.
+pub fn sum_usage_tokens(json: &str) -> u64 {
+    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
+        return 0;
+    };
+    entries
+        .iter()
+        .map(|e| e["input_tokens"].as_u64().unwrap_or(0) + e["output_tokens"].as_u64().unwrap_or(0))
+        .sum()
+}
+
 pub struct ExecutionStats {
     pub total_runs: u32,
     pub successful: u32,
@@ -455,22 +466,14 @@ impl Store {
 
         let failed = total_runs.saturating_sub(successful);
 
-        // Sum tokens from usage_json: parse each JSON array and sum input+output tokens
         let total_tokens: u64 = {
             let mut stmt = self.conn.prepare(
                 "SELECT usage_json FROM execution_history WHERE date(started_at) = date('now') AND usage_json IS NOT NULL",
             )?;
             let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-            let mut total = 0u64;
-            for json_str in rows.flatten() {
-                if let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                    for entry in entries {
-                        total += entry["input_tokens"].as_u64().unwrap_or(0);
-                        total += entry["output_tokens"].as_u64().unwrap_or(0);
-                    }
-                }
-            }
-            total
+            rows.flatten()
+                .map(|json_str| sum_usage_tokens(&json_str))
+                .sum()
         };
 
         Ok(ExecutionStats {

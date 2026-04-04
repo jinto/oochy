@@ -14,6 +14,10 @@ use kittypaw_cli::teach_loop;
 
 use kittypaw_store::Store;
 
+fn db_path() -> String {
+    std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into())
+}
+
 /// Build an LlmRegistry from config.
 /// Uses `[[models]]` if configured, otherwise falls back to the legacy `[llm]` section.
 fn build_registry(config: &Config) -> LlmRegistry {
@@ -300,7 +304,7 @@ async fn run_serve(bind_addr: &str) {
 
     let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
-    let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
+    let db_path = db_path();
     let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {
         eprintln!("Database error: {e}");
         std::process::exit(1);
@@ -786,7 +790,7 @@ async fn run_skill_cli(name: &str, dry_run: bool) {
         std::process::exit(1);
     });
 
-    let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
+    let db_path = db_path();
     let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {
         eprintln!("Database error: {e}");
         std::process::exit(1);
@@ -1162,7 +1166,7 @@ async fn run_chat() {
 
     let provider = require_provider(&config);
 
-    let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
+    let db_path = db_path();
     let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {
         eprintln!("Database error: {e}");
         std::process::exit(1);
@@ -1228,7 +1232,7 @@ async fn run_chat() {
 
 async fn run_status() {
     let config = Config::load().unwrap_or_default();
-    let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
+    let db_path = db_path();
     let store = match Store::open(&db_path) {
         Ok(s) => s,
         Err(e) => {
@@ -1285,7 +1289,7 @@ async fn run_status() {
 }
 
 async fn run_log(skill: Option<String>, limit: usize) {
-    let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
+    let db_path = db_path();
     let store = match Store::open(&db_path) {
         Ok(s) => s,
         Err(e) => {
@@ -1326,14 +1330,10 @@ async fn run_log(skill: Option<String>, limit: usize) {
 }
 
 fn parse_usage_tokens(usage_json: &Option<String>) -> u64 {
-    let Some(json) = usage_json else { return 0 };
-    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
-        return 0;
-    };
-    entries
-        .iter()
-        .map(|e| e["input_tokens"].as_u64().unwrap_or(0) + e["output_tokens"].as_u64().unwrap_or(0))
-        .sum()
+    usage_json
+        .as_deref()
+        .map(kittypaw_store::sum_usage_tokens)
+        .unwrap_or(0)
 }
 
 async fn run_stdin() {
@@ -1377,7 +1377,7 @@ async fn run_stdin() {
 
     let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
 
-    let db_path = std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into());
+    let db_path = db_path();
     let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {
         eprintln!("Database error: {e}");
         std::process::exit(1);
