@@ -86,13 +86,23 @@ pub fn ChatPanel() -> Element {
         document::eval(r#"setTimeout(() => document.getElementById('chat-input')?.focus(), 50)"#);
     };
 
-    // Restore focus + auto-scroll on every re-render
+    // Auto-scroll + focus via MutationObserver (once, not every render)
     use_effect(move || {
-        document::eval(r#"document.getElementById('chat-input')?.focus()"#);
         document::eval(
             r#"
-            const el = document.getElementById('chat-messages');
-            if (el) el.scrollTop = el.scrollHeight;
+            if (!window._kpObserver) {
+                // Initial focus
+                document.getElementById('chat-input')?.focus();
+
+                // Watch for new messages and auto-scroll
+                const el = document.getElementById('chat-messages');
+                if (el) {
+                    window._kpObserver = new MutationObserver(() => {
+                        el.scrollTop = el.scrollHeight;
+                    });
+                    window._kpObserver.observe(el, { childList: true, subtree: true });
+                }
+            }
         "#,
         );
     });
@@ -130,7 +140,7 @@ pub fn ChatPanel() -> Element {
                         const sendBtn = document.getElementById('chat-send');
                         if (sendBtn && !sendBtn.disabled) sendBtn.click();
                     }
-                    if (e.metaKey && e.key === 'e') {
+                    if (e.metaKey && e.key === 'r') {
                         e.preventDefault();
                         const micBtn = document.getElementById('chat-mic');
                         if (micBtn) micBtn.click();
@@ -253,7 +263,7 @@ pub fn ChatPanel() -> Element {
                             button {
                                 id: "chat-mic",
                                 style: "padding: 10px 12px; background: {mic_bg}; color: #1e293b; border: 1px solid #d1d5db; border-radius: 10px; cursor: pointer; font-size: 16px;",
-                                title: "음성 입력 (⌘E)",
+                                title: "음성 입력 (⌘R)",
                                 onclick: move |_| {
                                     let cur = *is_recording.read();
                                     if cur {
@@ -296,7 +306,7 @@ pub fn ChatPanel() -> Element {
                 // Shortcut hints
                 div { style: "display: flex; justify-content: flex-end; gap: 12px; margin-top: 4px; padding-right: 4px;",
                     span { style: "font-size: 10px; color: #b0adb0;", "Enter 전송" }
-                    span { style: "font-size: 10px; color: #b0adb0;", "⌘E 음성" }
+                    span { style: "font-size: 10px; color: #b0adb0;", "⌘R 음성" }
                     span { style: "font-size: 10px; color: #b0adb0;", "⌘⌫ 삭제" }
                 }
             }
