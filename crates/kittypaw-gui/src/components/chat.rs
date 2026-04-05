@@ -57,9 +57,8 @@ pub fn ChatPanel() -> Element {
                 };
                 match run_assistant_turn(&assistant_ctx).await {
                     Ok(turn) => {
-                        messages
-                            .write()
-                            .push(("assistant".into(), turn.response_text));
+                        let text = extract_reply_text(&turn.response_text);
+                        messages.write().push(("assistant".into(), text));
                     }
                     Err(e) => {
                         messages
@@ -83,6 +82,8 @@ pub fn ChatPanel() -> Element {
         messages.write().push(("user".into(), msg.clone()));
         input_text.set(String::new());
         chat_coroutine.send(msg);
+        // Keep focus on input while thinking
+        document::eval(r#"setTimeout(() => document.getElementById('chat-input')?.focus(), 50)"#);
     };
 
     rsx! {
@@ -262,6 +263,44 @@ fn ChatMessage(role: String, content: String) -> Element {
             }
         }
     }
+}
+
+/// Extract display text from LLM response.
+/// Handles cases where response is raw JSON like `[{"action":"reply","text":"..."}]`
+fn extract_reply_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+
+    // Try JSON array: [{"action":"reply","text":"..."}]
+    if trimmed.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(trimmed) {
+            let texts: Vec<&str> = arr
+                .iter()
+                .filter_map(|v| {
+                    if v.get("action")?.as_str()? == "reply" {
+                        v.get("text")?.as_str()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !texts.is_empty() {
+                return texts.join("\n\n");
+            }
+        }
+    }
+
+    // Try single JSON object: {"action":"reply","text":"..."}
+    if trimmed.starts_with('{') {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if v.get("action").and_then(|a| a.as_str()) == Some("reply") {
+                if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
+                    return text.to_string();
+                }
+            }
+        }
+    }
+
+    raw.to_string()
 }
 
 fn render_markdown(input: &str) -> String {
