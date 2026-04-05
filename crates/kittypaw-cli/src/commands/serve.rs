@@ -57,6 +57,27 @@ async fn api_executions(State(store): State<SharedStore>) -> Json<serde_json::Va
     }
 }
 
+async fn api_agents(State(store): State<SharedStore>) -> Json<serde_json::Value> {
+    let s = store.lock().await;
+    match s.list_agents() {
+        Ok(agents) => {
+            let items: Vec<serde_json::Value> = agents
+                .iter()
+                .map(|a| {
+                    serde_json::json!({
+                        "agent_id": a.agent_id,
+                        "created_at": a.created_at,
+                        "updated_at": a.updated_at,
+                        "turn_count": a.turn_count,
+                    })
+                })
+                .collect();
+            Json(serde_json::json!(items))
+        }
+        Err(_) => Json(serde_json::json!([])),
+    }
+}
+
 async fn dashboard_html() -> Html<&'static str> {
     Html(DASHBOARD_HTML)
 }
@@ -82,6 +103,9 @@ const DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
 <h1>&#128062; KittyPaw Dashboard</h1>
 <p class="refresh">Auto-refreshes every 30s</p>
 <div class="cards" id="stats"></div>
+<h2>Agents</h2>
+<table><thead><tr><th>Agent ID</th><th>Turns</th><th>Created</th><th>Last Active</th></tr></thead>
+<tbody id="agents"></tbody></table>
 <h2>Recent Executions</h2>
 <table><thead><tr><th>Time</th><th>Skill</th><th>Status</th><th>Duration</th><th>Summary</th></tr></thead>
 <tbody id="exec"></tbody></table>
@@ -94,6 +118,11 @@ async function refresh() {
       '<div class="card"><div class="value ok">'+(s.successful||0)+'</div><div class="label">Successful</div></div>'+
       '<div class="card"><div class="value fail">'+(s.failed||0)+'</div><div class="label">Failed</div></div>'+
       '<div class="card"><div class="value">'+(s.total_tokens||0)+'</div><div class="label">Tokens</div></div>';
+    const a = await (await fetch('/api/agents')).json();
+    document.getElementById('agents').innerHTML = a.map(function(ag) {
+      return '<tr><td>'+ag.agent_id+'</td><td>'+ag.turn_count+
+        '</td><td>'+(ag.created_at||'').slice(0,19)+'</td><td>'+(ag.updated_at||'').slice(0,19)+'</td></tr>';
+    }).join('') || '<tr><td colspan="4">No agents yet</td></tr>';
     const e = await (await fetch('/api/executions')).json();
     document.getElementById('exec').innerHTML = e.map(function(r) {
       return '<tr><td>'+(r.started_at||'').slice(0,19)+'</td><td>'+r.skill_name+
@@ -168,6 +197,7 @@ pub(crate) async fn run_serve(bind_addr: &str) {
         .route("/", get(dashboard_html))
         .route("/api/status", get(api_status))
         .route("/api/executions", get(api_executions))
+        .route("/api/agents", get(api_agents))
         .with_state(dashboard_store);
 
     // Start WebSocket channel (with dashboard routes merged)

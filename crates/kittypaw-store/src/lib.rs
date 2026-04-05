@@ -59,6 +59,14 @@ pub fn sum_usage_tokens(json: &str) -> u64 {
 }
 
 #[derive(serde::Serialize)]
+pub struct AgentSummary {
+    pub agent_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub turn_count: u32,
+}
+
+#[derive(serde::Serialize)]
 pub struct ExecutionStats {
     pub total_runs: u32,
     pub successful: u32,

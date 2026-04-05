@@ -1,6 +1,25 @@
 use super::*;
 
 impl Store {
+    pub fn list_agents(&self) -> Result<Vec<AgentSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT a.agent_id, a.created_at, a.updated_at, \
+                 COALESCE((SELECT COUNT(*) FROM conversations c WHERE c.agent_id = a.agent_id), 0) \
+             FROM agents a ORDER BY a.updated_at DESC",
+        )?;
+        let agents = stmt
+            .query_map([], |row| {
+                Ok(AgentSummary {
+                    agent_id: row.get(0)?,
+                    created_at: row.get(1)?,
+                    updated_at: row.get(2)?,
+                    turn_count: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(agents)
+    }
+
     pub fn load_state(&self, agent_id: &str) -> Result<Option<AgentState>> {
         let result: rusqlite::Result<(String, String)> = self.conn.query_row(
             "SELECT system_prompt, state_json FROM agents WHERE agent_id = ?1",
