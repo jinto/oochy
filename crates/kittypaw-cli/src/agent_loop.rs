@@ -496,6 +496,24 @@ fn build_prompt(
         content: SYSTEM_PROMPT.to_string(),
     }];
 
+    // Inject connected channel info so LLM can use Telegram/Slack/Discord directly
+    {
+        let mut channel_info = Vec::new();
+        if let Ok(Some(tg_id)) = kittypaw_core::secrets::get_secret("telegram", "chat_id") {
+            if !tg_id.is_empty() {
+                channel_info.push(format!(
+                    "Telegram connected. To send a message: await Telegram.sendMessage(\"{tg_id}\", \"your message\")"
+                ));
+            }
+        }
+        if !channel_info.is_empty() {
+            messages.push(LlmMessage {
+                role: Role::System,
+                content: channel_info.join("\n"),
+            });
+        }
+    }
+
     // Add compacted conversation history (3-stage: summary / truncated / full)
     let compacted = compact_turns(&state.turns, config, &CompactionMode::AgentLoop);
     messages.extend(compacted);

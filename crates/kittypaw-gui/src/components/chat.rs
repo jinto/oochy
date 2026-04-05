@@ -1,7 +1,7 @@
 use dioxus::desktop::use_global_shortcut;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
-use kittypaw_cli::assistant::{run_assistant_turn, AssistantContext};
+use kittypaw_cli::agent_loop::AgentSession;
 use kittypaw_core::config::Config;
 use kittypaw_core::types::{Event, EventType};
 use kittypaw_sandbox::sandbox::Sandbox;
@@ -47,18 +47,17 @@ pub fn ChatPanel() -> Element {
 
                 let config = Config::load().unwrap_or_default();
                 let sandbox = Sandbox::new_threaded(config.sandbox.clone());
-                let assistant_ctx = AssistantContext {
-                    event: &event,
+                let session = AgentSession {
                     provider: provider.as_ref(),
-                    store: state.store.clone(),
-                    registry_entries: &[],
+                    fallback_provider: None,
                     sandbox: &sandbox,
+                    store: state.store.clone(),
                     config: &config,
                     on_token: None,
+                    on_permission_request: None,
                 };
-                match run_assistant_turn(&assistant_ctx).await {
-                    Ok(turn) => {
-                        let text = extract_reply_text(&turn.response_text);
+                match session.run(event).await {
+                    Ok(text) => {
                         messages.write().push(("assistant".into(), text));
                     }
                     Err(e) => {
@@ -324,44 +323,6 @@ fn ChatMessage(role: String, content: String) -> Element {
             }
         }
     }
-}
-
-/// Extract display text from LLM response.
-/// Handles cases where response is raw JSON like `[{"action":"reply","text":"..."}]`
-fn extract_reply_text(raw: &str) -> String {
-    let trimmed = raw.trim();
-
-    // Try JSON array: [{"action":"reply","text":"..."}]
-    if trimmed.starts_with('[') {
-        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(trimmed) {
-            let texts: Vec<&str> = arr
-                .iter()
-                .filter_map(|v| {
-                    if v.get("action")?.as_str()? == "reply" {
-                        v.get("text")?.as_str()
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if !texts.is_empty() {
-                return texts.join("\n\n");
-            }
-        }
-    }
-
-    // Try single JSON object: {"action":"reply","text":"..."}
-    if trimmed.starts_with('{') {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if v.get("action").and_then(|a| a.as_str()) == Some("reply") {
-                if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
-                    return text.to_string();
-                }
-            }
-        }
-    }
-
-    raw.to_string()
 }
 
 fn render_markdown(input: &str) -> String {
