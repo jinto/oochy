@@ -14,7 +14,6 @@ pub fn ChatPanel() -> Element {
     let mut input_text = use_signal(String::new);
     let mut is_loading = use_signal(|| false);
     let mut is_recording = use_signal(|| false);
-    let mut show_shortcuts = use_signal(|| false);
 
     let chat_coroutine = use_coroutine(move |mut rx: UnboundedReceiver<String>| {
         let state = app_state.clone();
@@ -92,7 +91,33 @@ pub fn ChatPanel() -> Element {
         document::eval(r#"document.getElementById('chat-input')?.focus()"#);
     });
 
+    // Register document-level keyboard shortcuts via JS
+    use_effect(move || {
+        document::eval(
+            r#"
+            if (!window._kpShortcutsRegistered) {
+                window._kpShortcutsRegistered = true;
+                document.addEventListener('keydown', (e) => {
+                    if (e.metaKey) {
+                        document.body.classList.add('show-shortcuts');
+                    }
+                });
+                document.addEventListener('keyup', (e) => {
+                    if (!e.metaKey) {
+                        document.body.classList.remove('show-shortcuts');
+                    }
+                });
+            }
+        "#,
+        );
+    });
+
     rsx! {
+        style { r#"
+            .shortcut-hint {{ display: none; }}
+            body.show-shortcuts .shortcut-hint {{ display: block; }}
+        "# }
+
         div { style: "flex: 1; display: flex; flex-direction: column; overflow: hidden;",
 
             // Messages area
@@ -153,49 +178,6 @@ pub fn ChatPanel() -> Element {
                 }
             }
 
-            // Global keyboard shortcuts
-            div {
-                tabindex: 0,
-                onkeydown: move |e| {
-                    if e.modifiers().meta() {
-                        show_shortcuts.set(true);
-                        match e.key() {
-                            Key::Enter => send_message(),
-                            Key::Character(ref c) if c == "r" => {
-                                // Toggle recording
-                                let cur = *is_recording.read();
-                                if !cur {
-                                    is_recording.set(true);
-                                    spawn(async move {
-                                        match record_and_transcribe().await {
-                                            Ok(text) if !text.is_empty() => {
-                                                let current = input_text.read().clone();
-                                                let new_val = if current.is_empty() { text } else { format!("{current} {text}") };
-                                                input_text.set(new_val);
-                                            }
-                                            Ok(_) => {
-                                                messages.write().push(("assistant".into(), "음성이 인식되지 않았습니다.".into()));
-                                            }
-                                            Err(err) => {
-                                                messages.write().push(("assistant".into(), format!("음성 입력 오류: {err}")));
-                                            }
-                                        }
-                                        is_recording.set(false);
-                                    });
-                                } else {
-                                    is_recording.set(false);
-                                }
-                            }
-                            Key::Backspace => input_text.set(String::new()),
-                            _ => {}
-                        }
-                    }
-                },
-                onkeyup: move |_| {
-                    show_shortcuts.set(false);
-                },
-            }
-
             // Input area
             div { style: "padding: 12px 16px; border-top: 1px solid #e2e8f0;",
                 div { style: "display: flex; gap: 8px; align-items: center;",
@@ -228,7 +210,7 @@ pub fn ChatPanel() -> Element {
                     // Mic button
                     {
                         let recording = *is_recording.read();
-                        let shortcuts = *show_shortcuts.read();
+
                         let mic_bg = if recording { "#ef4444" } else { "#f1f5f9" };
                         rsx! {
                             div { style: "position: relative;",
@@ -261,10 +243,10 @@ pub fn ChatPanel() -> Element {
                                     },
                                     if recording { "⏹" } else { "🎤" }
                                 }
-                                if shortcuts {
-                                    span { style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
-                                        "⌘R"
-                                    }
+                                span {
+                                    class: "shortcut-hint",
+                                    style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
+                                    "⌘R"
                                 }
                             }
                         }
@@ -272,7 +254,7 @@ pub fn ChatPanel() -> Element {
                     // Send button
                     {
                         let loading = *is_loading.read();
-                        let shortcuts = *show_shortcuts.read();
+
                         let btn_bg = if loading { "#94a3b8" } else { "#2563eb" };
                         rsx! {
                             div { style: "position: relative;",
@@ -285,10 +267,10 @@ pub fn ChatPanel() -> Element {
                                     },
                                     if loading { "..." } else { "Send" }
                                 }
-                                if shortcuts {
-                                    span { style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
-                                        "⌘↵"
-                                    }
+                                span {
+                                    class: "shortcut-hint",
+                                    style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
+                                    "⌘↵"
                                 }
                             }
                         }
