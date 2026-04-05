@@ -129,13 +129,22 @@ pub fn ChatPanel() -> Element {
     });
 
     // Native OS-level keyboard shortcuts (bypasses WKWebView limitations)
+    // Debounce: ignore rapid repeats within 500ms
     use_global_shortcut(
         (
             dioxus::prelude::KeyCode::R,
             dioxus::desktop::tao::keyboard::ModifiersState::SUPER,
         ),
         move || {
-            document::eval(r#"document.getElementById('chat-mic')?.click()"#);
+            document::eval(
+                r#"
+                const now = Date.now();
+                if (!window._kpLastMic || now - window._kpLastMic > 500) {
+                    window._kpLastMic = now;
+                    document.getElementById('chat-mic')?.click();
+                }
+            "#,
+            );
         },
     )
     .ok();
