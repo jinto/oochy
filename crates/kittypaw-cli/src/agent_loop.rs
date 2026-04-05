@@ -12,7 +12,7 @@ use kittypaw_sandbox::sandbox::Sandbox;
 use kittypaw_store::Store;
 use tracing::{info_span, Instrument};
 
-const SYSTEM_PROMPT: &str = r#"You are KittyPaw, an AI agent that helps users by writing JavaScript (ES2020) code.
+pub const SYSTEM_PROMPT: &str = r#"You are KittyPaw, an AI agent that helps users by writing JavaScript (ES2020) code.
 
 ## How you work
 1. You receive an event (message, command, etc.)

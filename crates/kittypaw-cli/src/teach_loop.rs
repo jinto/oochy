@@ -163,6 +163,7 @@ pub fn approve_skill(result: &TeachResult) -> Result<()> {
                     primitives: permissions.clone(),
                     allowed_hosts: vec![],
                 },
+                format: kittypaw_core::skill::SkillFormat::Native,
             };
             kittypaw_core::skill::save_skill(&skill, code)?;
             tracing::info!("Skill '{}' saved successfully", skill_name);

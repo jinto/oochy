@@ -3,6 +3,22 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{KittypawError, Result};
 
+/// Skill format: KittyPaw native (.skill.toml + .js) or agentskills.io standard (SKILL.md).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillFormat {
+    /// KittyPaw native: .skill.toml + .js, executed in QuickJS sandbox
+    Native,
+    /// agentskills.io standard: SKILL.md, executed via LLM prompt injection
+    SkillMd,
+}
+
+impl Default for SkillFormat {
+    fn default() -> Self {
+        Self::Native
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
     pub name: String,
@@ -13,6 +29,8 @@ pub struct Skill {
     pub enabled: bool,
     pub trigger: SkillTrigger,
     pub permissions: SkillPermissions,
+    #[serde(default)]
+    pub format: SkillFormat,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -94,11 +112,21 @@ fn save_skill_in(dir: &Path, skill: &Skill, js_code: &str) -> Result<()> {
     Ok(())
 }
 
-/// Load all skills from the `.kittypaw/skills/` directory.
+/// Load all skills from `.kittypaw/skills/` and `.agents/skills/` directories.
 ///
-/// Skips entries with corrupt TOML or missing JS files, logging warnings.
+/// Supports both KittyPaw native (.skill.toml + .js) and agentskills.io (SKILL.md) formats.
 pub fn load_all_skills() -> Result<Vec<(Skill, String)>> {
-    load_all_skills_in(&skills_dir())
+    let mut skills = load_all_skills_in(&skills_dir())?;
+
+    // Also scan .agents/skills/ (agentskills.io standard path)
+    let agents_dir = PathBuf::from(".agents/skills");
+    if agents_dir.exists() {
+        if let Ok(mut agent_skills) = load_all_skills_in(&agents_dir) {
+            skills.append(&mut agent_skills);
+        }
+    }
+
+    Ok(skills)
 }
 
 fn load_all_skills_in(dir: &Path) -> Result<Vec<(Skill, String)>> {
@@ -113,6 +141,24 @@ fn load_all_skills_in(dir: &Path) -> Result<Vec<(Skill, String)>> {
         let entry = entry?;
         let path = entry.path();
 
+        // Check for SKILL.md directories (agentskills.io format)
+        if path.is_dir() {
+            let skill_md = path.join("SKILL.md");
+            if skill_md.exists() {
+                match parse_skill_md(&skill_md) {
+                    Ok(Some(pair)) => {
+                        skills.push(pair);
+                        continue;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::warn!("Failed to parse SKILL.md in {}: {e}", path.display());
+                    }
+                }
+            }
+        }
+
+        // Check for .skill.toml files (KittyPaw native format)
         let file_name = match path.file_name().and_then(|n| n.to_str()) {
             Some(n) => n.to_owned(),
             None => continue,
@@ -135,10 +181,127 @@ fn load_all_skills_in(dir: &Path) -> Result<Vec<(Skill, String)>> {
     Ok(skills)
 }
 
-/// Load a single skill by name.
+/// Parse an agentskills.io SKILL.md file into a Skill + prompt content.
+fn parse_skill_md(path: &Path) -> Result<Option<(Skill, String)>> {
+    let content = std::fs::read_to_string(path)?;
+
+    // Parse YAML frontmatter (between --- delimiters)
+    let (name, description, body) = if content.starts_with("---") {
+        let rest = &content[3..];
+        if let Some(end) = rest.find("---") {
+            let frontmatter = &rest[..end].trim();
+            let body = rest[end + 3..].trim().to_string();
+
+            // Simple YAML parsing for name and description
+            let mut name = String::new();
+            let mut desc = String::new();
+            for line in frontmatter.lines() {
+                let line = line.trim();
+                if let Some(val) = line.strip_prefix("name:") {
+                    name = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                } else if let Some(val) = line.strip_prefix("description:") {
+                    desc = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                }
+            }
+            (name, desc, body)
+        } else {
+            return Ok(None);
+        }
+    } else {
+        return Ok(None);
+    };
+
+    if name.is_empty() {
+        // Derive name from directory
+        let dir_name = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let name = dir_name.to_string();
+        let skill = Skill {
+            name: name.clone(),
+            version: 1,
+            description: if description.is_empty() {
+                format!("Skill from {}", dir_name)
+            } else {
+                description
+            },
+            created_at: String::new(),
+            updated_at: String::new(),
+            enabled: true,
+            trigger: SkillTrigger {
+                trigger_type: "message".into(),
+                cron: None,
+                natural: None,
+                keyword: Some(name),
+            },
+            permissions: SkillPermissions {
+                primitives: vec![
+                    "Http".into(),
+                    "Llm".into(),
+                    "Storage".into(),
+                    "Telegram".into(),
+                ],
+                allowed_hosts: vec![],
+            },
+            format: SkillFormat::SkillMd,
+        };
+        return Ok(Some((skill, body)));
+    }
+
+    let skill = Skill {
+        name: name.clone(),
+        version: 1,
+        description,
+        created_at: String::new(),
+        updated_at: String::new(),
+        enabled: true,
+        trigger: SkillTrigger {
+            trigger_type: "message".into(),
+            cron: None,
+            natural: None,
+            keyword: Some(name),
+        },
+        permissions: SkillPermissions {
+            primitives: vec![
+                "Http".into(),
+                "Llm".into(),
+                "Storage".into(),
+                "Telegram".into(),
+            ],
+            allowed_hosts: vec![],
+        },
+        format: SkillFormat::SkillMd,
+    };
+
+    Ok(Some((skill, body)))
+}
+
+/// Load a single skill by name. Checks both native (.skill.toml) and SKILL.md formats.
 pub fn load_skill(name: &str) -> Result<Option<(Skill, String)>> {
     let safe_name = sanitize_name(name)?;
-    load_single_skill(&skills_dir(), &safe_name)
+
+    // Try native format first
+    if let Some(pair) = load_single_skill(&skills_dir(), &safe_name)? {
+        return Ok(Some(pair));
+    }
+
+    // Try SKILL.md in .kittypaw/skills/{name}/SKILL.md
+    let skill_md = skills_dir().join(&safe_name).join("SKILL.md");
+    if skill_md.exists() {
+        return parse_skill_md(&skill_md);
+    }
+
+    // Try .agents/skills/{name}/SKILL.md
+    let agents_skill_md = PathBuf::from(".agents/skills")
+        .join(&safe_name)
+        .join("SKILL.md");
+    if agents_skill_md.exists() {
+        return parse_skill_md(&agents_skill_md);
+    }
+
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -286,6 +449,7 @@ mod tests {
                 primitives: vec!["http".into()],
                 allowed_hosts: vec!["example.com".into()],
             },
+            format: SkillFormat::Native,
         }
     }
 

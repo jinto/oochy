@@ -394,7 +394,30 @@ pub(crate) async fn run_serve(bind_addr: &str) {
                             .ok()
                             .flatten();
 
-                        if let Some((skill, js_code)) = found_skill {
+                        if let Some((skill, code_or_prompt)) = found_skill {
+                            // SKILL.md format: use LLM to generate JS from the prompt
+                            let js_code = if skill.format == kittypaw_core::skill::SkillFormat::SkillMd {
+                                let provider = super::helpers::require_provider(&config);
+                                let messages = vec![
+                                    kittypaw_core::types::LlmMessage {
+                                        role: kittypaw_core::types::Role::System,
+                                        content: format!("{}\n\n{}", kittypaw_cli::agent_loop::SYSTEM_PROMPT, code_or_prompt),
+                                    },
+                                    kittypaw_core::types::LlmMessage {
+                                        role: kittypaw_core::types::Role::User,
+                                        content: format!("Execute this skill for chat_id={}", session_id),
+                                    },
+                                ];
+                                match provider.generate(&messages).await {
+                                    Ok(resp) => resp.content,
+                                    Err(e) => {
+                                        send_telegram_message(&config, &session_id, &format!("SKILL.md 실행 오류: {e}")).await;
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                code_or_prompt
+                            };
                             let wrapped_code = format!("const ctx = JSON.parse(__context__);\n{js_code}");
                             let context = serde_json::json!({
                                 "event_type": "telegram",

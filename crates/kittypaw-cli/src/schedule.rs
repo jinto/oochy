@@ -1113,6 +1113,7 @@ mod tests {
                 primitives: vec![],
                 allowed_hosts: vec![],
             },
+            format: kittypaw_core::skill::SkillFormat::Native,
         }
     }
 

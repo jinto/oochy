@@ -193,6 +193,7 @@
 - [x] 자율성 레벨: AutonomyLevel (readonly/supervised/full) + execute_single_call 게이트
 - [x] 디바이스 페어링: paired_chat_ids + /pair 명령
 - [x] 자가 개선 루프: 스킬 2회 실패 시 LLM 자동 수정 (AutonomyLevel 연동, Full 모드)
+- [x] agentskills.io SKILL.md 네이티브 지원: 파서 + 로더 + LLM 프롬프트 주입 실행 + .agents/skills/ 스캔
 - [ ] /daily 모닝 브리핑 (Todoist + Calendar)
 
 ---
