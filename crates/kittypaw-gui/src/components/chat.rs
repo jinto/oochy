@@ -1,3 +1,4 @@
+use dioxus::desktop::use_global_shortcut;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use kittypaw_cli::assistant::{run_assistant_turn, AssistantContext};
@@ -127,34 +128,28 @@ pub fn ChatPanel() -> Element {
         });
     });
 
-    // Register Cmd+Enter (send) and Cmd+R (mic) via JS on the input element
-    use_effect(move || {
-        document::eval(
-            r#"
-            const input = document.getElementById('chat-input');
-            if (input && !input._kpShortcuts) {
-                input._kpShortcuts = true;
-                input.addEventListener('keydown', (e) => {
-                    if (e.metaKey && e.key === 'Enter') {
-                        e.preventDefault();
-                        const sendBtn = document.getElementById('chat-send');
-                        if (sendBtn && !sendBtn.disabled) sendBtn.click();
-                    }
-                    if (e.metaKey && e.key === 'r') {
-                        e.preventDefault();
-                        const micBtn = document.getElementById('chat-mic');
-                        if (micBtn) micBtn.click();
-                    }
-                    if (e.metaKey && e.key === 'Backspace') {
-                        e.preventDefault();
-                        const clearBtn = document.getElementById('chat-clear');
-                        if (clearBtn) clearBtn.click();
-                    }
-                });
-            }
-        "#,
-        );
-    });
+    // Native OS-level keyboard shortcuts (bypasses WKWebView limitations)
+    use_global_shortcut(
+        (
+            dioxus::prelude::KeyCode::R,
+            dioxus::desktop::tao::keyboard::ModifiersState::SUPER,
+        ),
+        move || {
+            document::eval(r#"document.getElementById('chat-mic')?.click()"#);
+        },
+    )
+    .ok();
+
+    use_global_shortcut(
+        (
+            dioxus::prelude::KeyCode::Backspace,
+            dioxus::desktop::tao::keyboard::ModifiersState::SUPER,
+        ),
+        move || {
+            document::eval(r#"document.getElementById('chat-clear')?.click()"#);
+        },
+    )
+    .ok();
 
     rsx! {
 
