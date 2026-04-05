@@ -255,15 +255,8 @@ pub fn ChatPanel() -> Element {
                                     } else {
                                         is_recording.set(true);
                                         spawn(async move {
-                                            match record_and_transcribe().await {
-                                                Ok(text) if !text.is_empty() => {
-                                                    let current = input_text.read().clone();
-                                                    let new_val = if current.is_empty() { text } else { format!("{current} {text}") };
-                                                    input_text.set(new_val);
-                                                }
-                                                Ok(_) => {
-                                                    messages.write().push(("assistant".into(), "음성이 인식되지 않았습니다.".into()));
-                                                }
+                                            match stream_transcribe(&mut input_text).await {
+                                                Ok(()) => {}
                                                 Err(e) => {
                                                     messages.write().push(("assistant".into(), format!("음성 입력 오류: {e}")));
                                                 }
@@ -378,32 +371,14 @@ fn render_markdown(input: &str) -> String {
     html_output
 }
 
-/// Record audio from microphone and transcribe using whisperkit-cli.
-/// Falls back to macOS `say` + SFSpeechRecognizer via a tiny Swift script.
-async fn record_and_transcribe() -> Result<String, String> {
-    use std::time::Duration;
+/// Stream-transcribe from microphone with real-time partial results.
+/// Updates `input_text` signal as words are recognized.
+/// Records until the Swift process ends (~10 seconds) or is killed.
+async fn stream_transcribe(input_text: &mut Signal<String>) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
 
-    // First try: whisperkit-cli (brew install whisperkit-cli)
-    let whisperkit = tokio::process::Command::new("whisperkit-cli")
-        .args(["transcribe", "--stream", "--max-duration", "10"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
-
-    if let Ok(child) = whisperkit {
-        match tokio::time::timeout(Duration::from_secs(15), child.wait_with_output()).await {
-            Ok(Ok(output)) => {
-                let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !text.is_empty() {
-                    return Ok(text);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Fallback: macOS native speech recognition via Swift script
-    // Permissions are pre-requested at app launch, so no dialog delay here
+    // Swift script with shouldReportPartialResults = true
+    // Each partial result overwrites the previous line (prints on new line)
     let swift_code = r#"
 import Speech
 import AVFoundation
@@ -412,7 +387,7 @@ import Foundation
 let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))!
 let audioEngine = AVAudioEngine()
 let request = SFSpeechAudioBufferRecognitionRequest()
-request.shouldReportPartialResults = false
+request.shouldReportPartialResults = true
 
 let node = audioEngine.inputNode
 let format = node.outputFormat(forBus: 0)
@@ -423,28 +398,30 @@ node.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
 audioEngine.prepare()
 try! audioEngine.start()
 
-// Record for 5 seconds
-DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
     audioEngine.stop()
     node.removeTap(onBus: 0)
     request.endAudio()
 }
 
 recognizer.recognitionTask(with: request) { result, error in
-    if let result = result, result.isFinal {
-        print(result.bestTranscription.formattedString)
-        exit(0)
+    if let result = result {
+        let text = result.bestTranscription.formattedString
+        print(text)
+        fflush(stdout)
+        if result.isFinal {
+            exit(0)
+        }
     }
     if error != nil {
-        print("")
         exit(1)
     }
 }
 
-RunLoop.main.run(until: Date(timeIntervalSinceNow: 8))
+RunLoop.main.run(until: Date(timeIntervalSinceNow: 12))
 "#;
 
-    let child = tokio::process::Command::new("swift")
+    let mut child = tokio::process::Command::new("swift")
         .arg("-e")
         .arg(swift_code)
         .stdout(std::process::Stdio::piped())
@@ -452,14 +429,22 @@ RunLoop.main.run(until: Date(timeIntervalSinceNow: 8))
         .spawn()
         .map_err(|e| format!("Failed to start speech recognition: {e}"))?;
 
-    match tokio::time::timeout(Duration::from_secs(12), child.wait_with_output()).await {
-        Ok(Ok(output)) => {
-            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Ok(text)
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Failed to capture stdout".to_string())?;
+    let mut reader = BufReader::new(stdout).lines();
+
+    // Read partial results line by line, updating input_text in real-time
+    while let Ok(Some(line)) = reader.next_line().await {
+        let trimmed = line.trim().to_string();
+        if !trimmed.is_empty() {
+            input_text.set(trimmed);
         }
-        Ok(Err(e)) => Err(format!("Speech recognition failed: {e}")),
-        Err(_) => Err("Speech recognition timed out".into()),
     }
+
+    let _ = child.wait().await;
+    Ok(())
 }
 
 #[component]
