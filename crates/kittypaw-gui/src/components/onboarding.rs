@@ -305,6 +305,7 @@ fn StepTelegram(on_next: EventHandler) -> Element {
     let mut want_telegram = use_signal(|| false);
     let mut bot_token = use_signal(String::new);
     let mut chat_id = use_signal(String::new);
+    let mut fetching_id = use_signal(|| false);
     let mut saved = use_signal(|| false);
 
     rsx! {
@@ -344,20 +345,17 @@ fn StepTelegram(on_next: EventHandler) -> Element {
                         }
                     }
                 } else {
-                    // Telegram setup guide
+                    // Telegram setup guide (compact)
                     div {
-                        style: "background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 8px; padding: 16px; margin-bottom: 20px; font-size: 13px; color: #92400E; line-height: 1.6;",
-                        div { style: "font-weight: 600; margin-bottom: 8px;", "텔레그램 봇 만들기" }
+                        style: "background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 8px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #92400E; line-height: 1.6;",
                         ol { style: "margin: 0; padding-left: 20px;",
-                            li { "텔레그램에서 " strong { "@BotFather" } " 검색" }
-                            li { strong { "/newbot" } " 입력 → 봇 이름 설정" }
+                            li { "텔레그램에서 " strong { "@BotFather" } " → " strong { "/newbot" } }
                             li { "발급된 토큰을 아래에 붙여넣기" }
-                            li { "만든 봇에게 아무 메시지 하나 보내기" }
-                            li { strong { "\"채팅 ID 가져오기\"" } " 버튼 클릭" }
                         }
                     }
 
                     div { style: "display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;",
+                        // 봇 토큰
                         div {
                             label { style: "font-size: 12px; font-weight: 600; color: #78716C; display: block; margin-bottom: 4px;", "봇 토큰" }
                             input {
@@ -366,7 +364,14 @@ fn StepTelegram(on_next: EventHandler) -> Element {
                                 value: "{bot_token}",
                                 oninput: move |e| bot_token.set(e.value()),
                             }
+                            if !bot_token.read().is_empty() {
+                                p {
+                                    style: "font-size: 12px; color: #2563eb; margin: 8px 0 0; line-height: 1.5;",
+                                    "👉 텔레그램에서 만든 봇에게 아무 메시지를 하나 보낸 후, 아래 버튼을 눌러주세요"
+                                }
+                            }
                         }
+                        // 채팅 ID
                         div {
                             label { style: "font-size: 12px; font-weight: 600; color: #78716C; display: block; margin-bottom: 4px;", "채팅 ID" }
                             div { style: "display: flex; gap: 8px;",
@@ -376,19 +381,27 @@ fn StepTelegram(on_next: EventHandler) -> Element {
                                     value: "{chat_id}",
                                     oninput: move |e| chat_id.set(e.value()),
                                 }
-                                button {
-                                    style: "padding: 10px 14px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;",
-                                    disabled: bot_token.read().is_empty(),
-                                    onclick: move |_| {
-                                        let token = bot_token.read().clone();
-                                        spawn(async move {
-                                            match kittypaw_core::telegram::fetch_chat_id(&token).await {
-                                                Ok(id) => chat_id.set(id),
-                                                Err(e) => chat_id.set(format!("오류: {e}")),
-                                            }
-                                        });
-                                    },
-                                    "채팅 ID 가져오기"
+                                {
+                                    let is_fetching = *fetching_id.read();
+                                    let btn_bg = if is_fetching { "#94a3b8" } else { "#2563eb" };
+                                    rsx! {
+                                        button {
+                                            style: "padding: 10px 14px; background: {btn_bg}; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; min-width: 120px;",
+                                            disabled: bot_token.read().is_empty() || is_fetching,
+                                            onclick: move |_| {
+                                                let token = bot_token.read().clone();
+                                                fetching_id.set(true);
+                                                spawn(async move {
+                                                    match kittypaw_core::telegram::fetch_chat_id(&token).await {
+                                                        Ok(id) => chat_id.set(id),
+                                                        Err(e) => chat_id.set(format!("오류: {e}")),
+                                                    }
+                                                    fetching_id.set(false);
+                                                });
+                                            },
+                                            if is_fetching { "가져오는 중..." } else { "채팅 ID 가져오기" }
+                                        }
+                                    }
                                 }
                             }
                         }
