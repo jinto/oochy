@@ -10,6 +10,7 @@ use crate::state::AppState;
 enum LlmChoice {
     None,
     Local,
+    OpenRouter,
     Claude,
 }
 
@@ -70,6 +71,7 @@ fn StepLlm(on_next: EventHandler) -> Element {
     let can_proceed = move || match choice() {
         LlmChoice::None => false,
         LlmChoice::Local => !local_url().is_empty() && !local_model().is_empty(),
+        LlmChoice::OpenRouter => !api_key().is_empty(),
         LlmChoice::Claude => !api_key().is_empty(),
     };
 
@@ -127,6 +129,46 @@ fn StepLlm(on_next: EventHandler) -> Element {
                                     value: "{local_model}",
                                     oninput: move |e| local_model.set(e.value()),
                                 }
+                            }
+                        }
+                    }
+                }
+
+                div { style: "height: 12px;" }
+
+                // OpenRouter card
+                div {
+                    style: if choice() == LlmChoice::OpenRouter {
+                        format!("{card_base} border-color: #86EFAC;")
+                    } else {
+                        format!("{card_base} border-color: #E7E5E4;")
+                    },
+                    onclick: move |_| choice.set(LlmChoice::OpenRouter),
+
+                    div { style: "display: flex; align-items: center; gap: 10px; margin-bottom: 4px;",
+                        div {
+                            style: if choice() == LlmChoice::OpenRouter {
+                                "width: 16px; height: 16px; border-radius: 50%; border: 2px solid #86EFAC; background: #86EFAC; flex-shrink: 0;"
+                            } else {
+                                "width: 16px; height: 16px; border-radius: 50%; border: 2px solid #E7E5E4; background: transparent; flex-shrink: 0;"
+                            }
+                        }
+                        span { style: "font-size: 14px; font-weight: 600; color: #1C1917;", "OpenRouter (무료)" }
+                    }
+                    p { style: "font-size: 12px; color: #78716C; margin: 0 0 0 26px;", "무료 AI 모델로 바로 시작하세요. OpenRouter에서 API 키만 발급받으면 됩니다." }
+
+                    if choice() == LlmChoice::OpenRouter {
+                        div { style: "margin-top: 16px;",
+                            label { style: "display: block; font-size: 12px; font-weight: 600; color: #1C1917; margin-bottom: 4px;", "API 키" }
+                            input {
+                                style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; font-family: monospace; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917;",
+                                r#type: "password",
+                                placeholder: "sk-or-...",
+                                value: "{api_key}",
+                                oninput: move |e| api_key.set(e.value()),
+                            }
+                            p { style: "font-size: 11px; color: #A8A29E; margin: 10px 0 0 0; line-height: 1.6; white-space: pre-line;",
+                                "1. openrouter.ai 에서 무료 가입\n2. Dashboard → API Keys → Create Key\n3. 발급된 키를 여기에 붙여넣기"
                             }
                         }
                     }
@@ -200,6 +242,20 @@ fn StepLlm(on_next: EventHandler) -> Element {
                                             )),
                                         );
                                         registry.set_default("local");
+                                    }
+                                    LlmChoice::OpenRouter => {
+                                        let key = api_key.read().clone();
+                                        let _ = kittypaw_core::secrets::set_secret("models", "openrouter", &key);
+                                        let mut registry = app_state.llm_registry.lock().unwrap();
+                                        registry.register(
+                                            "openrouter",
+                                            Arc::new(OpenAiProvider::with_base_url(
+                                                "https://openrouter.ai/api/v1".into(),
+                                                key,
+                                                "qwen/qwen3-235b-a22b:free".into(),
+                                                4096,
+                                            )),
+                                        );
                                     }
                                     LlmChoice::Claude => {
                                         let key = api_key.read().clone();
