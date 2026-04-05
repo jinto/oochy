@@ -1095,4 +1095,277 @@ mod tests {
             result.error
         );
     }
+
+    // ── Shell tests ──
+
+    #[tokio::test]
+    async fn test_shell_exec_echo() {
+        let call = SkillCall {
+            skill_name: "Shell".to_string(),
+            method: "exec".to_string(),
+            args: vec![json_str("echo hello")],
+        };
+        let result = shell::execute_shell(&call).await.unwrap();
+        assert_eq!(result["stdout"].as_str().unwrap().trim(), "hello");
+        assert_eq!(result["exit_code"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_shell_exec_empty_command() {
+        let call = SkillCall {
+            skill_name: "Shell".to_string(),
+            method: "exec".to_string(),
+            args: vec![json_str("")],
+        };
+        let result = shell::execute_shell(&call).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("command is required"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_unknown_method() {
+        let call = SkillCall {
+            skill_name: "Shell".to_string(),
+            method: "run".to_string(),
+            args: vec![],
+        };
+        let result = shell::execute_shell(&call).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown Shell method"));
+    }
+
+    // ── Git tests ──
+
+    #[tokio::test]
+    async fn test_git_status() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "status".to_string(),
+            args: vec![],
+        };
+        // Should succeed in any git repo (we're in one)
+        let result = git::execute_git(&call).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap()["exit_code"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_git_log() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "log".to_string(),
+            args: vec![serde_json::json!(3)],
+        };
+        let result = git::execute_git(&call).await.unwrap();
+        assert_eq!(result["exit_code"], 0);
+        let stdout = result["stdout"].as_str().unwrap();
+        assert!(!stdout.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_git_commit_empty_message() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "commit".to_string(),
+            args: vec![json_str("")],
+        };
+        let result = git::execute_git(&call).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("message is required"));
+    }
+
+    #[tokio::test]
+    async fn test_git_unknown_method() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "push".to_string(),
+            args: vec![],
+        };
+        let result = git::execute_git(&call).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown Git method"));
+    }
+
+    // ── is_read_only: Shell & Git ──
+
+    #[test]
+    fn test_is_read_only_git_status() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "status".to_string(),
+            args: vec![],
+        };
+        assert!(is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_read_only_git_diff() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "diff".to_string(),
+            args: vec![],
+        };
+        assert!(is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_read_only_git_log() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "log".to_string(),
+            args: vec![],
+        };
+        assert!(is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_not_read_only_git_commit() {
+        let call = SkillCall {
+            skill_name: "Git".to_string(),
+            method: "commit".to_string(),
+            args: vec![],
+        };
+        assert!(!is_read_only_skill_call(&call));
+    }
+
+    #[test]
+    fn test_is_not_read_only_shell_exec() {
+        let call = SkillCall {
+            skill_name: "Shell".to_string(),
+            method: "exec".to_string(),
+            args: vec![],
+        };
+        assert!(!is_read_only_skill_call(&call));
+    }
+
+    // ── File.edit tests ──
+
+    #[test]
+    fn test_file_edit_replaces_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "hello world").unwrap();
+
+        let call = SkillCall {
+            skill_name: "File".to_string(),
+            method: "edit".to_string(),
+            args: vec![json_str("test.txt"), json_str("hello"), json_str("goodbye")],
+        };
+        let result = file::execute_file(&call, Some(dir.path())).unwrap();
+        assert_eq!(result, serde_json::json!({ "ok": true }));
+
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "goodbye world");
+    }
+
+    #[test]
+    fn test_file_edit_old_content_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "hello world").unwrap();
+
+        let call = SkillCall {
+            skill_name: "File".to_string(),
+            method: "edit".to_string(),
+            args: vec![json_str("test.txt"), json_str("xyz"), json_str("abc")],
+        };
+        let result = file::execute_file(&call, Some(dir.path()));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not found in file"));
+    }
+
+    #[test]
+    fn test_file_edit_empty_path() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let call = SkillCall {
+            skill_name: "File".to_string(),
+            method: "edit".to_string(),
+            args: vec![json_str(""), json_str("old"), json_str("new")],
+        };
+        let result = file::execute_file(&call, Some(dir.path()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path is required"));
+    }
+
+    #[test]
+    fn test_file_edit_empty_old_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        let call = SkillCall {
+            skill_name: "File".to_string(),
+            method: "edit".to_string(),
+            args: vec![json_str("test.txt"), json_str(""), json_str("new")],
+        };
+        let result = file::execute_file(&call, Some(dir.path()));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("old content is required"));
+    }
+
+    #[test]
+    fn test_file_edit_path_traversal_blocked() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let call = SkillCall {
+            skill_name: "File".to_string(),
+            method: "edit".to_string(),
+            args: vec![
+                json_str("../../../etc/passwd"),
+                json_str("root"),
+                json_str("hacked"),
+            ],
+        };
+        let result = file::execute_file(&call, Some(dir.path()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("traversal"));
+    }
+
+    // ── process::truncate_utf8 tests ──
+
+    #[test]
+    fn test_truncate_utf8_short_input() {
+        let result = process::truncate_utf8(b"hello", 100);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_truncate_utf8_exact_limit() {
+        let result = process::truncate_utf8(b"hello", 5);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_truncate_utf8_over_limit() {
+        let result = process::truncate_utf8(b"hello world", 5);
+        assert!(result.starts_with("hello"));
+        assert!(result.contains("(truncated)"));
+    }
+
+    #[test]
+    fn test_truncate_utf8_multibyte() {
+        // "안녕" = 6 bytes in UTF-8, truncate at 4 should not panic
+        let input = "안녕".as_bytes();
+        let result = process::truncate_utf8(input, 4);
+        assert!(result.contains("(truncated)"));
+    }
 }
