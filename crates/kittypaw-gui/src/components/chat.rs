@@ -14,6 +14,7 @@ pub fn ChatPanel() -> Element {
     let mut input_text = use_signal(String::new);
     let mut is_loading = use_signal(|| false);
     let mut is_recording = use_signal(|| false);
+    let mut show_shortcuts = use_signal(|| false);
 
     let chat_coroutine = use_coroutine(move |mut rx: UnboundedReceiver<String>| {
         let state = app_state.clone();
@@ -152,80 +153,143 @@ pub fn ChatPanel() -> Element {
                 }
             }
 
+            // Global keyboard shortcuts
+            div {
+                tabindex: 0,
+                onkeydown: move |e| {
+                    if e.modifiers().meta() {
+                        show_shortcuts.set(true);
+                        match e.key() {
+                            Key::Enter => send_message(),
+                            Key::Character(ref c) if c == "r" => {
+                                // Toggle recording
+                                let cur = *is_recording.read();
+                                if !cur {
+                                    is_recording.set(true);
+                                    spawn(async move {
+                                        match record_and_transcribe().await {
+                                            Ok(text) if !text.is_empty() => {
+                                                let current = input_text.read().clone();
+                                                let new_val = if current.is_empty() { text } else { format!("{current} {text}") };
+                                                input_text.set(new_val);
+                                            }
+                                            Ok(_) => {
+                                                messages.write().push(("assistant".into(), "음성이 인식되지 않았습니다.".into()));
+                                            }
+                                            Err(err) => {
+                                                messages.write().push(("assistant".into(), format!("음성 입력 오류: {err}")));
+                                            }
+                                        }
+                                        is_recording.set(false);
+                                    });
+                                } else {
+                                    is_recording.set(false);
+                                }
+                            }
+                            Key::Backspace => input_text.set(String::new()),
+                            _ => {}
+                        }
+                    }
+                },
+                onkeyup: move |_| {
+                    show_shortcuts.set(false);
+                },
+            }
+
             // Input area
             div { style: "padding: 12px 16px; border-top: 1px solid #e2e8f0;",
-                div { style: "display: flex; gap: 8px;",
-                    input {
-                        id: "chat-input",
-                        style: "flex: 1; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; outline: none;",
-                        placeholder: "Message KittyPaw...",
-                        value: "{input_text}",
-                        autofocus: true,
-                        oninput: move |e| input_text.set(e.value()),
-                        onkeypress: move |e| {
-                            if e.key() == Key::Enter {
-                                send_message();
-                            }
-                        },
-                    }
-                    {
-                        let recording = *is_recording.read();
-                        let mic_bg = if recording { "#ef4444" } else { "#f1f5f9" };
-                        let mic_label = if recording { "⏹" } else { "🎤" };
-                        rsx! {
+                div { style: "display: flex; gap: 8px; align-items: center;",
+                    // Input with clear button
+                    div { style: "flex: 1; position: relative;",
+                        input {
+                            id: "chat-input",
+                            style: "width: 100%; padding: 10px 32px 10px 14px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; outline: none; box-sizing: border-box;",
+                            placeholder: "Message KittyPaw...",
+                            value: "{input_text}",
+                            autofocus: true,
+                            oninput: move |e| input_text.set(e.value()),
+                            onkeypress: move |e| {
+                                if e.key() == Key::Enter {
+                                    send_message();
+                                }
+                            },
+                        }
+                        if !input_text.read().is_empty() {
                             button {
-                                style: "padding: 10px 12px; background: {mic_bg}; color: #1e293b; border: 1px solid #d1d5db; border-radius: 10px; cursor: pointer; font-size: 16px;",
+                                style: "position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #94a3b8; font-size: 14px; padding: 2px 4px; line-height: 1;",
                                 onclick: move |_| {
-                                    let cur = *is_recording.read();
-                                    if cur {
-                                        is_recording.set(false);
-                                    } else {
-                                        is_recording.set(true);
-                                        // Spawn whisperkit-cli for mic transcription
-                                        spawn(async move {
-                                            match record_and_transcribe().await {
-                                                Ok(text) if !text.is_empty() => {
-                                                    let current = input_text.read().clone();
-                                                    let new_val = if current.is_empty() {
-                                                        text
-                                                    } else {
-                                                        format!("{current} {text}")
-                                                    };
-                                                    input_text.set(new_val);
-                                                }
-                                                Ok(_) => {
-                                                    messages.write().push((
-                                                        "assistant".into(),
-                                                        "음성이 인식되지 않았습니다. 다시 시도해주세요.".into(),
-                                                    ));
-                                                }
-                                                Err(e) => {
-                                                    messages.write().push((
-                                                        "assistant".into(),
-                                                        format!("음성 입력 오류: {e}\n\n`brew install whisperkit-cli`로 WhisperKit을 설치하면 더 정확한 음성 인식이 가능합니다."),
-                                                    ));
-                                                }
-                                            }
-                                            is_recording.set(false);
-                                        });
-                                    }
+                                    input_text.set(String::new());
+                                    document::eval(r#"document.getElementById('chat-input')?.focus()"#);
                                 },
-                                "{mic_label}"
+                                "✕"
                             }
                         }
                     }
+                    // Mic button
+                    {
+                        let recording = *is_recording.read();
+                        let shortcuts = *show_shortcuts.read();
+                        let mic_bg = if recording { "#ef4444" } else { "#f1f5f9" };
+                        rsx! {
+                            div { style: "position: relative;",
+                                button {
+                                    style: "padding: 10px 12px; background: {mic_bg}; color: #1e293b; border: 1px solid #d1d5db; border-radius: 10px; cursor: pointer; font-size: 16px;",
+                                    title: "음성 입력 (⌘R)",
+                                    onclick: move |_| {
+                                        let cur = *is_recording.read();
+                                        if cur {
+                                            is_recording.set(false);
+                                        } else {
+                                            is_recording.set(true);
+                                            spawn(async move {
+                                                match record_and_transcribe().await {
+                                                    Ok(text) if !text.is_empty() => {
+                                                        let current = input_text.read().clone();
+                                                        let new_val = if current.is_empty() { text } else { format!("{current} {text}") };
+                                                        input_text.set(new_val);
+                                                    }
+                                                    Ok(_) => {
+                                                        messages.write().push(("assistant".into(), "음성이 인식되지 않았습니다.".into()));
+                                                    }
+                                                    Err(e) => {
+                                                        messages.write().push(("assistant".into(), format!("음성 입력 오류: {e}")));
+                                                    }
+                                                }
+                                                is_recording.set(false);
+                                            });
+                                        }
+                                    },
+                                    if recording { "⏹" } else { "🎤" }
+                                }
+                                if shortcuts {
+                                    span { style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
+                                        "⌘R"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Send button
                     {
                         let loading = *is_loading.read();
+                        let shortcuts = *show_shortcuts.read();
                         let btn_bg = if loading { "#94a3b8" } else { "#2563eb" };
-                        let btn_label = if loading { "..." } else { "Send" };
                         rsx! {
-                            button {
-                                style: "padding: 10px 16px; background: {btn_bg}; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-size: 14px;",
-                                disabled: loading,
-                                onclick: move |_| {
-                                    send_message();
-                                },
-                                "{btn_label}"
+                            div { style: "position: relative;",
+                                button {
+                                    style: "padding: 10px 16px; background: {btn_bg}; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-size: 14px;",
+                                    disabled: loading,
+                                    title: "전송 (⌘↵)",
+                                    onclick: move |_| {
+                                        send_message();
+                                    },
+                                    if loading { "..." } else { "Send" }
+                                }
+                                if shortcuts {
+                                    span { style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
+                                        "⌘↵"
+                                    }
+                                }
                             }
                         }
                     }
