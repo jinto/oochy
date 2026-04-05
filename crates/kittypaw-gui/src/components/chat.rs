@@ -206,11 +206,28 @@ fn ChatMessage(role: String, content: String) -> Element {
     rsx! {
         div { style: "display: flex; flex-direction: column; align-items: {align}; margin-bottom: 16px;",
             span { style: "font-size: 11px; font-weight: 600; color: {label_color}; margin-bottom: 4px;", "{label}" }
-            div { style: "max-width: 80%; padding: 10px 14px; background: {bg}; border-radius: 12px; font-size: 14px; color: #1e293b; line-height: 1.5; white-space: pre-wrap;",
-                "{content}"
+            if is_user {
+                div { style: "max-width: 80%; padding: 10px 14px; background: {bg}; border-radius: 12px; font-size: 14px; color: #1e293b; line-height: 1.5; white-space: pre-wrap;",
+                    "{content}"
+                }
+            } else {
+                div {
+                    class: "markdown-body",
+                    style: "max-width: 80%; padding: 10px 14px; background: {bg}; border-radius: 12px; font-size: 14px; color: #1e293b; line-height: 1.6;",
+                    dangerous_inner_html: render_markdown(&content),
+                }
             }
         }
     }
+}
+
+fn render_markdown(input: &str) -> String {
+    use pulldown_cmark::{html, Options, Parser};
+    let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES;
+    let parser = Parser::new_ext(input, opts);
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
 }
 
 #[component]
