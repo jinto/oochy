@@ -91,32 +91,7 @@ pub fn ChatPanel() -> Element {
         document::eval(r#"document.getElementById('chat-input')?.focus()"#);
     });
 
-    // Register document-level keyboard shortcuts via JS
-    use_effect(move || {
-        document::eval(
-            r#"
-            if (!window._kpShortcutsRegistered) {
-                window._kpShortcutsRegistered = true;
-                document.addEventListener('keydown', (e) => {
-                    if (e.metaKey) {
-                        document.body.classList.add('show-shortcuts');
-                    }
-                });
-                document.addEventListener('keyup', (e) => {
-                    if (!e.metaKey) {
-                        document.body.classList.remove('show-shortcuts');
-                    }
-                });
-            }
-        "#,
-        );
-    });
-
     rsx! {
-        style { r#"
-            .shortcut-hint {{ display: none; }}
-            body.show-shortcuts .shortcut-hint {{ display: block; }}
-        "# }
 
         div { style: "flex: 1; display: flex; flex-direction: column; overflow: hidden;",
 
@@ -210,68 +185,52 @@ pub fn ChatPanel() -> Element {
                     // Mic button
                     {
                         let recording = *is_recording.read();
-
                         let mic_bg = if recording { "#ef4444" } else { "#f1f5f9" };
                         rsx! {
-                            div { style: "position: relative;",
-                                button {
-                                    style: "padding: 10px 12px; background: {mic_bg}; color: #1e293b; border: 1px solid #d1d5db; border-radius: 10px; cursor: pointer; font-size: 16px;",
-                                    title: "음성 입력 (⌘R)",
-                                    onclick: move |_| {
-                                        let cur = *is_recording.read();
-                                        if cur {
-                                            is_recording.set(false);
-                                        } else {
-                                            is_recording.set(true);
-                                            spawn(async move {
-                                                match record_and_transcribe().await {
-                                                    Ok(text) if !text.is_empty() => {
-                                                        let current = input_text.read().clone();
-                                                        let new_val = if current.is_empty() { text } else { format!("{current} {text}") };
-                                                        input_text.set(new_val);
-                                                    }
-                                                    Ok(_) => {
-                                                        messages.write().push(("assistant".into(), "음성이 인식되지 않았습니다.".into()));
-                                                    }
-                                                    Err(e) => {
-                                                        messages.write().push(("assistant".into(), format!("음성 입력 오류: {e}")));
-                                                    }
+                            button {
+                                style: "padding: 10px 12px; background: {mic_bg}; color: #1e293b; border: 1px solid #d1d5db; border-radius: 10px; cursor: pointer; font-size: 16px;",
+                                title: "음성 입력",
+                                onclick: move |_| {
+                                    let cur = *is_recording.read();
+                                    if cur {
+                                        is_recording.set(false);
+                                    } else {
+                                        is_recording.set(true);
+                                        spawn(async move {
+                                            match record_and_transcribe().await {
+                                                Ok(text) if !text.is_empty() => {
+                                                    let current = input_text.read().clone();
+                                                    let new_val = if current.is_empty() { text } else { format!("{current} {text}") };
+                                                    input_text.set(new_val);
                                                 }
-                                                is_recording.set(false);
-                                            });
-                                        }
-                                    },
-                                    if recording { "⏹" } else { "🎤" }
-                                }
-                                span {
-                                    class: "shortcut-hint",
-                                    style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
-                                    "⌘R"
-                                }
+                                                Ok(_) => {
+                                                    messages.write().push(("assistant".into(), "음성이 인식되지 않았습니다.".into()));
+                                                }
+                                                Err(e) => {
+                                                    messages.write().push(("assistant".into(), format!("음성 입력 오류: {e}")));
+                                                }
+                                            }
+                                            is_recording.set(false);
+                                        });
+                                    }
+                                },
+                                if recording { "⏹" } else { "🎤" }
                             }
                         }
                     }
                     // Send button
                     {
                         let loading = *is_loading.read();
-
                         let btn_bg = if loading { "#94a3b8" } else { "#2563eb" };
                         rsx! {
-                            div { style: "position: relative;",
-                                button {
-                                    style: "padding: 10px 16px; background: {btn_bg}; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-size: 14px;",
-                                    disabled: loading,
-                                    title: "전송 (⌘↵)",
-                                    onclick: move |_| {
-                                        send_message();
-                                    },
-                                    if loading { "..." } else { "Send" }
-                                }
-                                span {
-                                    class: "shortcut-hint",
-                                    style: "position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #94a3b8; white-space: nowrap;",
-                                    "⌘↵"
-                                }
+                            button {
+                                style: "padding: 10px 16px; background: {btn_bg}; color: #fff; border: none; border-radius: 10px; cursor: pointer; font-size: 14px;",
+                                disabled: loading,
+                                title: "전송 (Enter)",
+                                onclick: move |_| {
+                                    send_message();
+                                },
+                                if loading { "..." } else { "↵" }
                             }
                         }
                     }
