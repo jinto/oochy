@@ -86,6 +86,11 @@ pub fn ChatPanel() -> Element {
         document::eval(r#"setTimeout(() => document.getElementById('chat-input')?.focus(), 50)"#);
     };
 
+    // Restore focus on every re-render (Dioxus recreates the input element)
+    use_effect(move || {
+        document::eval(r#"document.getElementById('chat-input')?.focus()"#);
+    });
+
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; overflow: hidden;",
 
