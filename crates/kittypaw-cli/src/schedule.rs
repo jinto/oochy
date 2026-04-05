@@ -316,6 +316,7 @@ fn handle_execution_failure(
     error_msg: &str,
     input_params: Option<&str>,
     can_disable: bool,
+    usage_json: Option<&str>,
 ) {
     increment_failure_count(db_path, id).ok();
     let failures = get_failure_count(db_path, id);
@@ -331,7 +332,7 @@ fn handle_execution_failure(
         false,
         failures as i32,
         input_params,
-        None, // usage_json — not yet tracked in failure path
+        usage_json,
     );
     // Store failure hint for self-improvement
     let hint_key = format!("failure_hint:{}", id);
@@ -382,6 +383,7 @@ fn handle_run_failure(
     error_msg: &str,
     input_params: &str,
     can_disable: bool,
+    usage_json: Option<&str>,
 ) {
     let finished_at = Utc::now();
     let duration_ms = (finished_at - started_at).num_milliseconds();
@@ -397,6 +399,7 @@ fn handle_run_failure(
         error_msg,
         Some(input_params),
         can_disable,
+        usage_json,
     );
     append_execution_log(data_dir, id, false, duration_ms, error_msg);
 }
@@ -412,6 +415,7 @@ fn handle_run_success(
     started_at: DateTime<Utc>,
     output: &str,
     input_params: &str,
+    usage_json: Option<&str>,
 ) {
     let finished_at = Utc::now();
     let duration_ms = (finished_at - started_at).num_milliseconds();
@@ -425,7 +429,7 @@ fn handle_run_success(
         true,
         0,
         Some(input_params),
-        None,
+        usage_json,
     );
     set_last_run(db_path, id, Utc::now()).ok();
     reset_failure_count(db_path, id).ok();
@@ -531,6 +535,7 @@ async fn execute_scheduled_skill(
                     err_msg,
                     &input_params,
                     true,
+                    None,
                 );
             } else {
                 tracing::info!(
@@ -548,6 +553,7 @@ async fn execute_scheduled_skill(
                     started_at,
                     &result.output,
                     &input_params,
+                    None,
                 );
             }
         }
@@ -570,6 +576,7 @@ async fn execute_scheduled_skill(
                     &error_msg,
                     &input_params,
                     true,
+                    None,
                 );
             }
         }
@@ -587,6 +594,7 @@ async fn execute_scheduled_skill(
                     &e.to_string(),
                     &input_params,
                     true,
+                    None,
                 );
             }
         }
@@ -806,6 +814,7 @@ async fn execute_scheduled_package(
                     err_msg,
                     input_params,
                     false,
+                    None,
                 );
             } else {
                 tracing::info!(
@@ -823,6 +832,7 @@ async fn execute_scheduled_package(
                     started_at,
                     &result.output,
                     input_params,
+                    None,
                 );
 
                 // Execute chain steps if present
@@ -859,6 +869,7 @@ async fn execute_scheduled_package(
                     &error_msg,
                     input_params,
                     false,
+                    None,
                 );
             }
         }
@@ -876,6 +887,7 @@ async fn execute_scheduled_package(
                     &e.to_string(),
                     input_params,
                     false,
+                    None,
                 );
             }
         }
