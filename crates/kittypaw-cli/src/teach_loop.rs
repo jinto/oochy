@@ -56,8 +56,13 @@ pub async fn handle_teach(
     sandbox: &Sandbox,
     config: &Config,
 ) -> Result<TeachResult> {
-    // Admin check (deny-by-default: empty list blocks all)
-    if config.admin_chat_ids.is_empty() || !config.admin_chat_ids.iter().any(|id| id == chat_id) {
+    // Admin check: Desktop/CLI (chat_id starts with "session_" or is empty) always allowed.
+    // Remote channels require explicit admin_chat_ids config.
+    let is_local = chat_id.is_empty() || chat_id == "local" || chat_id.starts_with("session_");
+    if !is_local
+        && (config.admin_chat_ids.is_empty()
+            || !config.admin_chat_ids.iter().any(|id| id == chat_id))
+    {
         return Ok(TeachResult::Error(
             "Permission denied: you are not an admin.".into(),
         ));
