@@ -1,3 +1,4 @@
+mod agent;
 mod discord;
 mod env;
 mod file;
@@ -470,6 +471,7 @@ async fn execute_single_call(
         "Env" => env::execute_env(call, None),
         "Shell" => shell::execute_shell(call).await,
         "Git" => git::execute_git(call).await,
+        "Agent" => agent::execute_agent(call, config).await,
         _ => Err(KittypawError::CapabilityDenied(format!(
             "Unknown skill: {}",
             call.skill_name
@@ -1367,5 +1369,75 @@ mod tests {
         let input = "안녕".as_bytes();
         let result = process::truncate_utf8(input, 4);
         assert!(result.contains("(truncated)"));
+    }
+
+    // ── Agent.delegate tests ──
+
+    #[tokio::test]
+    async fn test_agent_delegate_empty_task() {
+        let call = SkillCall {
+            skill_name: "Agent".to_string(),
+            method: "delegate".to_string(),
+            args: vec![json_str("")],
+        };
+        let config = kittypaw_core::config::Config::default();
+        let result = agent::execute_agent(&call, &config).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("task description is required"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_delegate_depth_exceeded() {
+        let call = SkillCall {
+            skill_name: "Agent".to_string(),
+            method: "delegate".to_string(),
+            args: vec![json_str("do something"), serde_json::json!(2)],
+        };
+        let config = kittypaw_core::config::Config::default();
+        let result = agent::execute_agent(&call, &config).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("max depth"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_delegate_no_provider() {
+        let call = SkillCall {
+            skill_name: "Agent".to_string(),
+            method: "delegate".to_string(),
+            args: vec![json_str("do something")],
+        };
+        let config = kittypaw_core::config::Config::default();
+        let result = agent::execute_agent(&call, &config).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no LLM provider"));
+    }
+
+    #[tokio::test]
+    async fn test_agent_unknown_method() {
+        let call = SkillCall {
+            skill_name: "Agent".to_string(),
+            method: "spawn".to_string(),
+            args: vec![],
+        };
+        let config = kittypaw_core::config::Config::default();
+        let result = agent::execute_agent(&call, &config).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown Agent method"));
+    }
+
+    #[test]
+    fn test_is_not_read_only_agent_delegate() {
+        let call = SkillCall {
+            skill_name: "Agent".to_string(),
+            method: "delegate".to_string(),
+            args: vec![],
+        };
+        assert!(!is_read_only_skill_call(&call));
     }
 }

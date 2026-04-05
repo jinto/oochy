@@ -65,6 +65,16 @@ enum Commands {
         #[command(subcommand)]
         command: DaemonCommands,
     },
+    /// Install a skill from GitHub URL or local path
+    Install {
+        /// GitHub URL (https://github.com/user/repo) or local path (./path/to/skill)
+        source: String,
+    },
+    /// Search for skills in the registry
+    Search {
+        /// Keyword to search for
+        keyword: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -180,6 +190,12 @@ async fn main() {
             DaemonCommands::Uninstall => commands::daemon::run_daemon_uninstall(),
             DaemonCommands::Status => commands::daemon::run_daemon_status(),
         },
+        Some(Commands::Install { source }) => {
+            commands::install::run_install(&source).await;
+        }
+        Some(Commands::Search { keyword }) => {
+            commands::install::run_search(&keyword).await;
+        }
         None => {
             commands::chat::run_stdin().await;
         }
