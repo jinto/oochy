@@ -2,6 +2,7 @@
 
 mod bundled_packages;
 mod components;
+mod i18n;
 mod state;
 
 use std::sync::Arc;

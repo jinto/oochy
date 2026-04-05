@@ -91,7 +91,55 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
 
             // Page header
             div { style: "margin-bottom: 28px;",
-                h1 { style: "font-size: 24px; font-weight: 600; color: #1C1917; margin: 0;", "Settings" }
+                h1 { style: "font-size: 24px; font-weight: 600; color: #1C1917; margin: 0;",
+                    { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.title") }
+                }
+            }
+
+            // ── Language selector ──
+            div {
+                style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; padding: 24px; margin-bottom: 16px;",
+
+                div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                    span { style: "font-size: 12px; font-weight: 600; color: #78716C; white-space: nowrap;",
+                        { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.language") }
+                    }
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                }
+
+                div { style: "display: flex; gap: 8px;",
+                    {
+                        let locales = [crate::i18n::Locale::Ko, crate::i18n::Locale::En];
+                        rsx! {
+                            for locale in locales {
+                                {
+                                    let current = use_context::<Signal<crate::i18n::I18n>>().read().locale;
+                                    let is_active = current == locale;
+                                    let bg = if is_active { "#1C1917" } else { "#F5F3F0" };
+                                    let color = if is_active { "#F5F3F0" } else { "#1C1917" };
+                                    let store = app_state.store.clone();
+                                    rsx! {
+                                        button {
+                                            style: "padding: 8px 20px; background: {bg}; color: {color}; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; cursor: pointer;",
+                                            onclick: move |_| {
+                                                let mut i18n_sig = use_context::<Signal<crate::i18n::I18n>>();
+                                                i18n_sig.set(crate::i18n::I18n::new(locale));
+                                                let store = store.clone();
+                                                let lang = locale.as_str().to_string();
+                                                spawn(async move {
+                                                    let s = store.lock().await;
+                                                    let _ = s.set_user_context("locale", &lang, "system");
+                                                });
+                                            },
+                                            { locale.label() }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // ── Anthropic API Key section ──

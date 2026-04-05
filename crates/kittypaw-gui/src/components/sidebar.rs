@@ -1,7 +1,12 @@
 use dioxus::prelude::*;
 
+use crate::i18n::I18n;
+
 #[component]
 pub fn Sidebar(active_tab: String, on_tab_change: EventHandler<String>) -> Element {
+    let i18n = use_context::<Signal<I18n>>();
+    let t = |key: &str| i18n.read().t(key).to_string();
+
     rsx! {
         div {
             style: "width: 220px; min-width: 220px; background: #1C1917; color: #D6D3D1; display: flex; flex-direction: column; padding: 12px 16px; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; overflow: hidden; flex-shrink: 0;",
@@ -24,28 +29,28 @@ pub fn Sidebar(active_tab: String, on_tab_change: EventHandler<String>) -> Eleme
                 style: "display: flex; flex-direction: column; gap: 2px; flex: 1;",
 
                 NavItem {
-                    label: "Chat",
+                    label: t("nav.chat"),
                     icon: "💬",
                     tab: "chat",
                     active: active_tab == "chat",
                     on_click: move |_| on_tab_change.call("chat".into()),
                 }
                 NavItem {
-                    label: "상황판",
+                    label: t("nav.dashboard"),
                     icon: "📊",
                     tab: "dashboard",
                     active: active_tab == "dashboard",
                     on_click: move |_| on_tab_change.call("dashboard".into()),
                 }
                 NavItem {
-                    label: "Skills",
+                    label: t("nav.skills"),
                     icon: "🧩",
                     tab: "skills",
                     active: active_tab == "skills",
                     on_click: move |_| on_tab_change.call("skills".into()),
                 }
                 NavItem {
-                    label: "Settings",
+                    label: t("nav.settings"),
                     icon: "⚙️",
                     tab: "settings",
                     active: active_tab == "settings",
@@ -64,7 +69,7 @@ pub fn Sidebar(active_tab: String, on_tab_change: EventHandler<String>) -> Eleme
 
 #[component]
 fn NavItem(
-    label: &'static str,
+    label: String,
     icon: &'static str,
     tab: &'static str,
     active: bool,

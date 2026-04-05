@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
 use super::{chat, dashboard, onboarding, permission_dialog, settings, sidebar, skill_gallery};
+use crate::i18n::{I18n, Locale};
 use crate::state::{AppState, PermissionQueue};
 
 #[component]
@@ -8,6 +9,24 @@ pub fn App() -> Element {
     let app_state = use_context::<AppState>();
     let mut active_tab = use_signal(|| "chat".to_string());
     let mut onboarding_done = use_signal(|| false);
+
+    // I18n: provide locale as context, default to system locale or Korean
+    use_context_provider(|| Signal::new(I18n::new(Locale::Ko)));
+
+    // Load saved locale from store
+    {
+        let store_arc = app_state.store.clone();
+        use_effect(move || {
+            let store_arc = store_arc.clone();
+            spawn(async move {
+                let store = store_arc.lock().await;
+                if let Ok(Some(lang)) = store.get_user_context("locale") {
+                    let mut i18n = use_context::<Signal<I18n>>();
+                    i18n.set(I18n::new(Locale::from_str(&lang)));
+                }
+            });
+        });
+    }
 
     // Provide the reactive permission queue as context so that both the
     // dialog component and any async tasks can push / pop requests.
