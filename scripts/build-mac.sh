@@ -23,6 +23,13 @@ mkdir -p "${APP_DIR}/Contents/Resources"
 # Copy binary
 cp "${BUILD_DIR}/${BIN_NAME}" "${APP_DIR}/Contents/MacOS/${APP_NAME}"
 
+# Compile and bundle Swift mic helper
+echo "Compiling kittypaw-mic Swift helper..."
+swiftc -O -o "${APP_DIR}/Contents/MacOS/kittypaw-mic" \
+    "${SCRIPT_DIR}/kittypaw-mic.swift" \
+    -framework Speech -framework AVFoundation 2>/dev/null || \
+    echo "Warning: Swift mic helper compilation failed (optional)"
+
 # Create Info.plist
 cat > "${APP_DIR}/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>

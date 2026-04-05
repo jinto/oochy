@@ -213,6 +213,11 @@ cargo fmt                 # 포맷
 
 ---
 
+## Acknowledgments
+
+- [Whispree](https://github.com/Arsture/whispree) (MIT License) — Speech recognition architecture reference
+- [agentskills.io](https://agentskills.io) — SKILL.md skill format standard
+
 ## 라이선스
 
 MIT

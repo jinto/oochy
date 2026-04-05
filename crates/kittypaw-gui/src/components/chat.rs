@@ -372,62 +372,47 @@ fn render_markdown(input: &str) -> String {
 }
 
 /// Stream-transcribe from microphone with real-time partial results.
-/// Updates `input_text` signal as words are recognized.
-/// Records until the Swift process ends (~10 seconds) or is killed.
+/// Uses the bundled kittypaw-mic Swift helper for reliable performance.
+/// Falls back to swift -e inline script if helper not found.
 async fn stream_transcribe(input_text: &mut Signal<String>) -> Result<(), String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
-    // Swift script with shouldReportPartialResults = true
-    // Each partial result overwrites the previous line (prints on new line)
-    let swift_code = r#"
-import Speech
-import AVFoundation
-import Foundation
+    // Try bundled helper first (compiled, fast startup)
+    let mic_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("kittypaw-mic")));
 
-let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))!
-let audioEngine = AVAudioEngine()
-let request = SFSpeechAudioBufferRecognitionRequest()
-request.shouldReportPartialResults = true
-
-let node = audioEngine.inputNode
-let format = node.outputFormat(forBus: 0)
-node.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-    request.append(buffer)
-}
-
-audioEngine.prepare()
-try! audioEngine.start()
-
-DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-    audioEngine.stop()
-    node.removeTap(onBus: 0)
-    request.endAudio()
-}
-
-recognizer.recognitionTask(with: request) { result, error in
-    if let result = result {
-        let text = result.bestTranscription.formattedString
-        print(text)
-        fflush(stdout)
-        if result.isFinal {
-            exit(0)
+    let mut child = if let Some(ref path) = mic_path {
+        if path.exists() {
+            tokio::process::Command::new(path)
+                .args(["--lang", "ko-KR", "--duration", "10"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .ok()
+        } else {
+            None
         }
-    }
-    if error != nil {
-        exit(1)
-    }
-}
+    } else {
+        None
+    };
 
-RunLoop.main.run(until: Date(timeIntervalSinceNow: 12))
-"#;
+    // Fallback: run Swift source directly
+    if child.is_none() {
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/kittypaw-mic.swift"
+        );
+        child = tokio::process::Command::new("swift")
+            .arg(script)
+            .args(["--lang", "ko-KR", "--duration", "10"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .ok();
+    }
 
-    let mut child = tokio::process::Command::new("swift")
-        .arg("-e")
-        .arg(swift_code)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start speech recognition: {e}"))?;
+    let mut child = child.ok_or("Failed to start speech recognition")?;
 
     let stdout = child
         .stdout
