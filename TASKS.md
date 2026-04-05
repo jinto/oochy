@@ -76,13 +76,18 @@
 - [x] 패턴 매칭: 실패 시 자동 재시도 (exponential backoff)
 - [x] 패턴 매칭: 시간 패턴 감지 → 스케줄 제안 (대시보드 제안 카드)
 
-### 🔴 P0: GUI 대시보드 퍼스트 ✅
-> 메인 화면은 "내 자동화 현황판" — 채팅이 아니다
+### 🔴 P0: GUI Chat 퍼스트 ✅
+> 메인 화면은 "Chat" — 대시보드는 "상황판"으로 이동
 - [x] `dashboard.rs` 신규 컴포넌트 (활성 스킬 + 실행 결과 + 다음 스케줄)
 - [x] 오늘의 실행 요약 (성공/실패/자동최적화)
 - [x] "조용한 개선" 카운터: "이번 주 N번의 자동 최적화 적용됨"
-- [x] 채팅을 세 번째 탭 또는 사이드 패널로 이동 (설정/디버깅 전용)
-- [x] 앱 실행 시 대시보드가 기본 화면
+- [x] Chat을 첫 번째 탭으로, Dashboard를 "상황판"으로 변경
+- [x] 퀵 프롬프트 버튼 4개 (너는 누구니 / 어떤 일 / 지금 뭐해 / 새 스킬)
+- [x] Chat 마크다운 렌더링 (pulldown-cmark HTML 변환)
+- [x] Chat 자동 스크롤 (MutationObserver)
+- [x] JSON reply 파싱 (LLM이 JSON으로 응답 시 text 추출)
+- [x] 입력창 클리어 버튼 (✕) + 키보드 단축키 힌트
+- [x] macOS .app 번들 빌드 (scripts/build-mac.sh)
 
 ### 🔴 P0: 큐레이션 스킬 10개
 > 기존 5개 + 사용자 리서치 기반 5개
@@ -158,7 +163,7 @@
 
 ### Extension 시스템 (v3+, 검토 필요)
 - [ ] 스킬이 커스텀 UI를 그리거나 도구를 등록할 수 있는 확장 레이어
-- [ ] agentskills.io 호환 검토 (Pi/Claude Code/Codex CLI 공용 스킬 포맷)
+- [x] agentskills.io 호환: SKILL.md 네이티브 지원 + .agents/skills/ 스캔
 
 ### Agent Runtime Hardening (Claude Code 분석 참고)
 - [x] `agent_loop.rs` 상태 전이 명시화 (`generate` → `execute` → `retry` → `finish`) + transition reason 로그
@@ -194,6 +199,12 @@
 - [x] 디바이스 페어링: paired_chat_ids + /pair 명령
 - [x] 자가 개선 루프: 스킬 2회 실패 시 LLM 자동 수정 (AutonomyLevel 연동, Full 모드)
 - [x] agentskills.io SKILL.md 네이티브 지원: 파서 + 로더 + LLM 프롬프트 주입 실행 + .agents/skills/ 스캔
+- [x] Shell/Git/File.edit 프리미티브: Hermes/ZeroClaw 런타임 호환
+- [x] 스킬 허브: `kittypaw install <github-url>` + `kittypaw search <keyword>`
+- [x] Agent.delegate 프리미티브: 서브에이전트 위임 (깊이 제한 2)
+- [x] 다국어 i18n (ko/en): 42개 UI 문자열 + Settings 언어 선택
+- [x] 마이크 음성입력: kittypaw-mic Swift 헬퍼 + SFSpeechRecognizer 실시간 전사
+- [x] 네이티브 키보드 단축키: use_global_shortcut (⌘R 음성, ⌘⌫ 삭제)
 - [ ] /daily 모닝 브리핑 (Todoist + Calendar)
 
 ---

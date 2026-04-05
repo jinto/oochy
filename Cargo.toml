@@ -35,3 +35,15 @@ kittypaw-sandbox = { path = "crates/kittypaw-sandbox" }
 kittypaw-store = { path = "crates/kittypaw-store" }
 kittypaw-channels = { path = "crates/kittypaw-channels" }
 kittypaw-workspace = { path = "crates/kittypaw-workspace" }
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
