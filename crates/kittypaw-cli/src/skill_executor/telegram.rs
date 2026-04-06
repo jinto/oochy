@@ -4,23 +4,57 @@ use kittypaw_core::types::SkillCall;
 
 use super::resolve_channel_token;
 
-/// Extract and validate chat_id (args[0]) and a second required arg (args[1]).
-/// Returns the two values or an error naming the missing field.
-pub(super) fn require_telegram_args<'a>(
-    call: &'a SkillCall,
+/// Extract chat_id (args[0]) and a second required arg (args[1]).
+/// If chat_id is missing or invalid (e.g. "me"), falls back to the default
+/// chat_id from secrets store. Also supports single-arg calls like
+/// `Telegram.sendMessage("text only")` where chat_id is auto-resolved.
+pub(super) fn require_telegram_args(
+    call: &SkillCall,
     second_name: &str,
-) -> Result<(&'a str, &'a str)> {
-    let chat_id = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
-    let second = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
-    if chat_id.is_empty() {
-        return Err(KittypawError::Skill("Telegram: missing chat_id".into()));
+) -> Result<(String, String)> {
+    let arg0 = call.args.first().and_then(|v| v.as_str()).unwrap_or("");
+    let arg1 = call.args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+
+    // If only one arg provided (args.len() == 1), treat it as the message text
+    if call.args.len() == 1 && !arg0.is_empty() {
+        let default_id = resolve_default_chat_id()?;
+        return Ok((default_id, arg0.to_string()));
     }
-    if second.is_empty() {
+
+    // If chat_id looks invalid (not numeric, not starting with -), use default
+    let chat_id = if arg0.is_empty() || (!arg0.starts_with('-') && arg0.parse::<i64>().is_err()) {
+        resolve_default_chat_id()?
+    } else {
+        arg0.to_string()
+    };
+
+    if arg1.is_empty() {
         return Err(KittypawError::Skill(format!(
             "Telegram: missing {second_name}"
         )));
     }
-    Ok((chat_id, second))
+
+    Ok((chat_id, arg1.to_string()))
+}
+
+fn resolve_default_chat_id() -> Result<String> {
+    // Try secrets: telegram/chat_id (onboarding) or channels/telegram_chat_id (settings)
+    kittypaw_core::secrets::get_secret("telegram", "chat_id")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            kittypaw_core::secrets::get_secret("channels", "telegram_chat_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+        })
+        .ok_or_else(|| {
+            KittypawError::Config(
+                "Telegram: chat_id가 설정되지 않았습니다. 설정 위자드에서 텔레그램을 연결해주세요."
+                    .into(),
+            )
+        })
 }
 
 pub(super) async fn execute_telegram(

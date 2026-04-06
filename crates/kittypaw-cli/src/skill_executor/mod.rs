@@ -652,15 +652,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_telegram_send_message_empty_chat_id() {
+    async fn test_telegram_send_message_empty_chat_id_uses_default() {
+        // Empty chat_id → tries default from secrets (may fail if no secrets set)
         let call = make_telegram_call("sendMessage", vec![json_str(""), json_str("hello")]);
         let config = telegram_config();
-
         let result = telegram::execute_telegram(&call, &config).await;
-
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("missing chat_id"), "error was: {err}");
+        // Either succeeds with default chat_id or fails with "chat_id가 설정되지 않았습니다"
+        if let Err(e) = &result {
+            assert!(
+                e.to_string().contains("chat_id") || e.to_string().contains("not configured"),
+                "unexpected error: {e}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -501,9 +501,9 @@ fn build_prompt(
         let mut channel_info = Vec::new();
         if let Ok(Some(tg_id)) = kittypaw_core::secrets::get_secret("telegram", "chat_id") {
             if !tg_id.is_empty() {
-                channel_info.push(format!(
-                    "Telegram connected. To send a message: await Telegram.sendMessage(\"{tg_id}\", \"your message\")"
-                ));
+                channel_info.push(
+                    "Telegram is connected. Send messages with: await Telegram.sendMessage(\"message text\")".to_string()
+                );
             }
         }
         if !channel_info.is_empty() {
