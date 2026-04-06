@@ -100,7 +100,7 @@ async fn test_agent_loop_storage_round_trip() {
         r#"
         await Storage.set("greeting", "world");
         const val = await Storage.get("greeting");
-        return "stored: " + val;
+        return "stored: " + (val && val.value ? val.value : JSON.stringify(val));
         "#,
     );
     let config = test_config();
@@ -122,7 +122,7 @@ async fn test_agent_loop_storage_round_trip() {
     let result = session.run(desktop_event("store something")).await;
     assert!(result.is_ok(), "storage round-trip: {:?}", result);
     let text = result.unwrap();
-    // Storage.get returns JSON {"value":"world"}, so the concatenation includes it
+    // Storage.get now returns a parsed JS object {value: "world"} (auto-parse)
     assert!(
         text.contains("world"),
         "expected stored value containing 'world', got: {text}"
@@ -574,4 +574,56 @@ async fn test_dangerous_code_audit_logged() {
             "output: {text}"
         );
     }
+}
+
+// ── Web.search Tavily backend integration ─────────────────────────────
+
+/// Web.search with Tavily backend returns real results (requires TAVILY_API_KEY secret).
+/// This test calls the actual Tavily API — skip if no key configured.
+#[tokio::test]
+async fn test_web_search_tavily_real_results() {
+    // Check if Tavily key is available
+    let tavily_key = kittypaw_core::secrets::get_secret("search", "tavily_api_key")
+        .ok()
+        .flatten()
+        .filter(|k| !k.is_empty());
+    if tavily_key.is_none() {
+        // CI에서는 키 없이 스킵. 로컬에서는 ~/.kittypaw/secrets.json에 설정 필요.
+        return;
+    }
+    let _key = tavily_key.unwrap(); // 키 존재 확인됨
+
+    let provider = MockJsProvider::new(
+        r#"
+        const results = await Web.search("artificial intelligence news");
+        if (!results || !results.results || results.results.length === 0) {
+            return "EMPTY";
+        }
+        return "FOUND:" + results.results.length + ":" + results.results[0].title;
+        "#,
+    );
+    let config = test_config();
+    let sandbox = Sandbox::new_threaded(config.sandbox.clone());
+    let store = Arc::new(Mutex::new(
+        Store::open(":memory:").expect("in-memory store"),
+    ));
+
+    let session = kittypaw_cli::agent_loop::AgentSession {
+        provider: &provider,
+        fallback_provider: None,
+        sandbox: &sandbox,
+        store: store.clone(),
+        config: &config,
+        on_token: None,
+        on_permission_request: None,
+    };
+
+    let result = session.run(desktop_event("search test")).await;
+    assert!(result.is_ok(), "web search should succeed: {:?}", result);
+    let text = result.unwrap();
+    eprintln!("Web.search result: {text}");
+    assert!(
+        text.starts_with("FOUND:"),
+        "expected real results starting with FOUND:, got: {text}"
+    );
 }

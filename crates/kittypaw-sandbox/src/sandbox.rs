@@ -143,7 +143,8 @@ mod tests {
             Some(resolver),
         );
         assert!(r.success, "error: {:?}", r.error);
-        assert_eq!(r.output, r#"{"status": "ok", "data": [1,2,3]}"#);
+        // auto-parse + __str re-serializes JSON without extra spaces
+        assert_eq!(r.output, r#"{"status":"ok","data":[1,2,3]}"#);
         assert_eq!(r.skill_calls.len(), 1);
         assert_eq!(r.skill_calls[0].skill_name, "Http");
     }

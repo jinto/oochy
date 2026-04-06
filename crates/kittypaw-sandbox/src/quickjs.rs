@@ -163,8 +163,33 @@ pub(crate) fn run_child_async(
                 let _ = globals.set("console", console);
                 let _ = globals.set("__context__", context.to_string());
 
-                // Wrap code in async IIFE and await the promise
-                let wrapped = format!("(async function() {{\n{code}\n}})()");
+                // Wrap skill stubs to auto-parse JSON string results into JS objects.
+                // Without this, `await Web.search("q")` returns a JSON string like
+                // '{"results":[...]}' and `results.results` would be undefined.
+                let skill_names: Vec<&str> = KNOWN_SKILLS.iter().map(|(name, _)| *name).collect();
+                let wrap_js = skill_names.iter().map(|name| {
+                    format!(
+                        "for (const k of Object.keys({name})) {{\n\
+                           const _orig = {name}[k];\n\
+                           {name}[k] = async function() {{\n\
+                             const r = await _orig.apply(this, arguments);\n\
+                             if (r === null || r === undefined || r === 'null') return null;\n\
+                             try {{ return JSON.parse(r); }} catch(e) {{ return r; }}\n\
+                           }};\n\
+                         }}"
+                    )
+                }).collect::<Vec<_>>().join("\n");
+                let _: std::result::Result<(), _> = ctx.eval(wrap_js.as_bytes());
+
+                // Wrap code in async IIFE.
+                // The final return must be a string (rquickjs resolves the promise as String).
+                // __str ensures non-string returns (objects, null) are serialized.
+                let wrapped = format!(
+                    "(async function() {{\n\
+                     function __str(v) {{ if (v === null || v === undefined) return ''; if (typeof v === 'object') return JSON.stringify(v); return String(v); }}\n\
+                     return __str(await (async function() {{\n{code}\n}})()); }})()"
+                );
+
                 let eval_result: std::result::Result<rquickjs::Promise, _> = ctx.eval(wrapped.as_bytes());
 
                 match eval_result {

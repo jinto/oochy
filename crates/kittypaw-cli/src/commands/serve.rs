@@ -201,7 +201,9 @@ pub(crate) async fn run_serve(bind_addr: &str) {
         std::process::exit(1);
     });
 
-    let sandbox = Arc::new(kittypaw_sandbox::sandbox::Sandbox::new(
+    // Use threaded sandbox — ForkedSandbox ignores skill_resolver (can't pass
+    // closures across fork), so Web.search/Storage/Memory calls would return null.
+    let sandbox = Arc::new(kittypaw_sandbox::sandbox::Sandbox::new_threaded(
         config.sandbox.clone(),
     ));
 

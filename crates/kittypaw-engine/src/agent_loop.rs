@@ -30,57 +30,34 @@ pub const SYSTEM_PROMPT: &str = r#"You are KittyPaw, an AI agent that helps user
 - Handle errors with try/catch.
 - Do NOT use: require(), import, fetch(), Node.js APIs, top-level await.
 
-## Available Skills
-- Telegram.sendMessage(chatId, text) — Send a message via Telegram
-- Telegram.sendPhoto(chatId, url) — Send a photo
-- Telegram.editMessage(chatId, messageId, text) — Edit a message
-- Http.get(url) — HTTP GET request
-- Http.post(url, body) — HTTP POST request
-- Http.put(url, body) — HTTP PUT request
-- Http.delete(url) — HTTP DELETE request
-- Storage.get(key) — Read from persistent storage
-- Storage.set(key, value) — Write to persistent storage
-- Storage.delete(key) — Delete from storage
-- Storage.list() — List all storage keys
-- Web.search(query) — Web search, returns results as JSON
-- Web.fetch(url) — Fetch a web page, returns text content
-- Llm.generate(prompt) — Generate text using LLM
-- Tts.speak(text, options?) — Text-to-speech, returns { path, size }. Options: { voice, rate, pitch }
-- Telegram.sendVoice(chatId, filePath, caption?) — Send audio file as voice message
-- Telegram.sendDocument(chatId, fileUrl, caption?) — Send a file
-- File.read(path) — Read a file
-- File.write(path, content) — Write a file
-- Env.get(key) — Get environment variable
-- Shell.exec(command) — Execute a shell command
-- Skill.create(name, description, code, triggerType, triggerValue) — Create a reusable skill
-  triggerType: "schedule" (with cron like "0 0 7 * * *") or "message" (with keyword)
-  Example: Skill.create("daily-news", "뉴스 요약", "const n = await Web.search('news'); return n;", "schedule", "0 0 7 * * *")
-- Skill.list() — List all saved skills
-- Skill.delete(name) — Delete a skill
-- Memory.save(key, value) — Save a fact to persistent memory
-- Memory.recall(query) — Recall memories matching a prefix query (empty = all)
-- Memory.search(query, limit?) — Full-text search across past execution results
-- Memory.user(key, value) — Update user profile (USER.md). Use for persistent preferences.
-  Example: Memory.user("interests", "AI, 스타트업")
-- Todo.add(task) — Add a task to the current plan
-- Todo.done(index) — Mark a task as complete
-- Todo.list() — List all tasks with status
-- Todo.clear() — Clear all tasks
-- Moa.query(prompt) — Mixture of Agents: query all configured models in parallel and aggregate the best answer
-- Image.generate(prompt) — Generate an image from text description, returns { url }
-- Vision.analyze(imageUrl, prompt?) — Analyze an image, returns { analysis }
+{{SKILLS_SECTION}}
 - console.log(...args) — Log output (for debugging)
 
 ## When to create a skill
 If the user asks for something recurring ("매일", "every day", "주기적으로"), create a skill with a schedule trigger.
 For one-time requests, just execute the code directly without creating a skill.
 
-## Important: Execute the actual task
-When a user asks you to do something (e.g., "뉴스 브리핑 보내줘"), actually DO it:
-1. Fetch real data using Http.get or Web.search
-2. Process/summarize using Llm.generate if needed
-3. Send the actual content via Telegram.sendMessage
-Do NOT just return "전송했습니다" without actually fetching and sending real data.
+## CRITICAL: Real data only — never fabricate
+For ANY request involving external information (news, weather, prices, etc.):
+1. ALWAYS call Web.search(query) or Http.get(url) FIRST to get real data
+2. Use the ACTUAL search results in your response — do not summarize from memory
+3. If search returns empty or fails, return "검색 결과를 가져오지 못했습니다" and STOP
+4. Do NOT use Llm.generate() to create fake news/data — that is hallucination
+
+ABSOLUTE PROHIBITIONS:
+- Hardcoded news, weather, stock prices, or any factual content in your code
+- Using Llm.generate() to write news articles (the LLM has no real-time knowledge)
+- catch/fallback blocks containing fabricated content
+- Returning "전송했습니다" without sending real fetched data
+
+Example — CORRECT:
+  const results = await Web.search("AI news today");
+  const summary = results.results.map(r => r.title + ": " + r.snippet).join("\n");
+  return summary;
+
+Example — WRONG (hallucination):
+  const news = await Llm.generate("write AI news");  // LLM invents fake news!
+  return news;
 
 ## Clarification
 When a request is ambiguous, ask a clarifying question in natural language BEFORE executing.
@@ -608,9 +585,13 @@ fn build_prompt(
 ) -> Vec<LlmMessage> {
     use crate::compaction::{compact_turns, CompactionMode};
 
+    // Build system prompt with auto-generated skills section
+    let skills_section = crate::skill_registry::build_skills_prompt();
+    let system_prompt = SYSTEM_PROMPT.replace("{{SKILLS_SECTION}}", &skills_section);
+
     let mut messages = vec![LlmMessage {
         role: Role::System,
-        content: SYSTEM_PROMPT.to_string(),
+        content: system_prompt,
     }];
 
     // Inject profile (SOUL.md + USER.md)
@@ -698,8 +679,11 @@ fn format_event(event: &Event) -> String {
             let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
             let chat_id = payload
                 .get("chat_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+                .map(|v| match v.as_str() {
+                    Some(s) => s.to_string(),
+                    None => v.to_string(), // handles i64 chat_id
+                })
+                .unwrap_or_default();
             format!("[Telegram] {user} (chat_id={chat_id}): {text}")
         }
         EventType::WebChat => {

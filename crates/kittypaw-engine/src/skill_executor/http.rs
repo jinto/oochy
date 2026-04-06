@@ -132,49 +132,9 @@ pub(super) async fn execute_web(
             }
             let max_results = call.args.get(1).and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
-            // Use DuckDuckGo Instant Answer API (free, no API key)
-            let url = format!(
-                "https://api.duckduckgo.com/?q={}&format=json&no_html=1&skip_disambig=1",
-                urlencoding::encode(query)
-            );
-            let resp = client
-                .get(&url)
-                .header("User-Agent", "KittyPaw/0.1")
-                .send()
-                .await
-                .map_err(|e| KittypawError::Skill(format!("Web.search error: {e}")))?;
-
-            let body: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| KittypawError::Skill(format!("Web.search parse error: {e}")))?;
-
-            // Extract results from DuckDuckGo response
-            let mut results = Vec::new();
-
-            // Abstract (direct answer)
-            if let Some(abstract_text) = body["AbstractText"].as_str() {
-                if !abstract_text.is_empty() {
-                    results.push(serde_json::json!({
-                        "title": body["Heading"].as_str().unwrap_or(""),
-                        "snippet": abstract_text,
-                        "url": body["AbstractURL"].as_str().unwrap_or(""),
-                    }));
-                }
-            }
-
-            // Related topics
-            if let Some(topics) = body["RelatedTopics"].as_array() {
-                for topic in topics.iter().take(max_results) {
-                    if let Some(text) = topic["Text"].as_str() {
-                        results.push(serde_json::json!({
-                            "title": text.split(" - ").next().unwrap_or(text),
-                            "snippet": text,
-                            "url": topic["FirstURL"].as_str().unwrap_or(""),
-                        }));
-                    }
-                }
-            }
+            // Multi-backend search: auto-select based on available API keys.
+            // Priority: Brave → Tavily → Exa → DuckDuckGo Instant Answer (fallback).
+            let results = web_search_dispatch(query, max_results).await?;
 
             Ok(serde_json::json!({
                 "query": query,
@@ -306,4 +266,212 @@ pub(super) fn strip_html_tags(html: &str) -> String {
         }
     }
     collapsed.trim().to_string()
+}
+
+// ── Multi-backend web search dispatch ────────────────────────────────────
+
+/// Auto-select search backend based on available API keys.
+/// Priority: Brave → Tavily → Exa → DuckDuckGo Instant Answer (fallback).
+async fn web_search_dispatch(query: &str, max_results: usize) -> Result<Vec<serde_json::Value>> {
+    use kittypaw_core::secrets::get_secret;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    // 1. Brave Search (free 2000 queries/month)
+    if let Ok(Some(key)) = get_secret("search", "brave_api_key") {
+        if !key.is_empty() {
+            return brave_search(&client, &key, query, max_results).await;
+        }
+    }
+
+    // 2. Tavily (free 1000 queries/month)
+    if let Ok(Some(key)) = get_secret("search", "tavily_api_key") {
+        if !key.is_empty() {
+            return tavily_search(&client, &key, query, max_results).await;
+        }
+    }
+
+    // 3. Exa (AI-native search)
+    if let Ok(Some(key)) = get_secret("search", "exa_api_key") {
+        if !key.is_empty() {
+            return exa_search(&client, &key, query, max_results).await;
+        }
+    }
+
+    // 4. Fallback: DuckDuckGo Instant Answer API (free, no key, but limited)
+    ddg_instant_answer(&client, query, max_results).await
+}
+
+async fn brave_search(
+    client: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+    max_results: usize,
+) -> Result<Vec<serde_json::Value>> {
+    let resp = client
+        .get("https://api.search.brave.com/res/v1/web/search")
+        .header("X-Subscription-Token", api_key)
+        .header("Accept", "application/json")
+        .query(&[("q", query), ("count", &max_results.to_string())])
+        .send()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Brave search error: {e}")))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Brave parse error: {e}")))?;
+
+    let results = body["web"]["results"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .take(max_results)
+                .map(|r| {
+                    serde_json::json!({
+                        "title": r["title"].as_str().unwrap_or(""),
+                        "snippet": r["description"].as_str().unwrap_or(""),
+                        "url": r["url"].as_str().unwrap_or(""),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(results)
+}
+
+async fn tavily_search(
+    client: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+    max_results: usize,
+) -> Result<Vec<serde_json::Value>> {
+    let resp = client
+        .post("https://api.tavily.com/search")
+        .json(&serde_json::json!({
+            "api_key": api_key,
+            "query": query,
+            "max_results": max_results,
+            "include_raw_content": false,
+        }))
+        .send()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Tavily search error: {e}")))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Tavily parse error: {e}")))?;
+
+    let results = body["results"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .take(max_results)
+                .map(|r| {
+                    serde_json::json!({
+                        "title": r["title"].as_str().unwrap_or(""),
+                        "snippet": r["content"].as_str().unwrap_or(""),
+                        "url": r["url"].as_str().unwrap_or(""),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(results)
+}
+
+async fn exa_search(
+    client: &reqwest::Client,
+    api_key: &str,
+    query: &str,
+    max_results: usize,
+) -> Result<Vec<serde_json::Value>> {
+    let resp = client
+        .post("https://api.exa.ai/search")
+        .header("x-api-key", api_key)
+        .json(&serde_json::json!({
+            "query": query,
+            "numResults": max_results,
+            "type": "neural",
+        }))
+        .send()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Exa search error: {e}")))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("Exa parse error: {e}")))?;
+
+    let results = body["results"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .take(max_results)
+                .map(|r| {
+                    serde_json::json!({
+                        "title": r["title"].as_str().unwrap_or(""),
+                        "snippet": r["text"].as_str().unwrap_or(""),
+                        "url": r["url"].as_str().unwrap_or(""),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(results)
+}
+
+async fn ddg_instant_answer(
+    client: &reqwest::Client,
+    query: &str,
+    max_results: usize,
+) -> Result<Vec<serde_json::Value>> {
+    let url = format!(
+        "https://api.duckduckgo.com/?q={}&format=json&no_html=1&skip_disambig=1",
+        urlencoding::encode(query)
+    );
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "KittyPaw/0.1")
+        .send()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("DDG search error: {e}")))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| KittypawError::Skill(format!("DDG parse error: {e}")))?;
+
+    let mut results = Vec::new();
+
+    if let Some(text) = body["AbstractText"].as_str() {
+        if !text.is_empty() {
+            results.push(serde_json::json!({
+                "title": body["Heading"].as_str().unwrap_or(""),
+                "snippet": text,
+                "url": body["AbstractURL"].as_str().unwrap_or(""),
+            }));
+        }
+    }
+
+    if let Some(topics) = body["RelatedTopics"].as_array() {
+        for topic in topics.iter().take(max_results) {
+            if let Some(text) = topic["Text"].as_str() {
+                results.push(serde_json::json!({
+                    "title": text.split(" - ").next().unwrap_or(text),
+                    "snippet": text,
+                    "url": topic["FirstURL"].as_str().unwrap_or(""),
+                }));
+            }
+        }
+    }
+
+    Ok(results)
 }

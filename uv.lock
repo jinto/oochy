@@ -549,6 +549,62 @@ wheels = [
 ]
 
 [[package]]
+name = "kittypaw"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "boto3" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+api = [
+    { name = "fastapi" },
+    { name = "mangum" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "uvicorn" },
+]
+dev = [
+    { name = "moto", extra = ["s3"] },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+infra = [
+    { name = "aws-cdk-lib" },
+    { name = "constructs" },
+]
+sandbox = [
+    { name = "mypy" },
+    { name = "restrictedpython" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.52.0" },
+    { name = "aws-cdk-lib", marker = "extra == 'infra'", specifier = ">=2.180.0" },
+    { name = "boto3", specifier = ">=1.35.0" },
+    { name = "constructs", marker = "extra == 'infra'", specifier = ">=10.4.0" },
+    { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "mangum", marker = "extra == 'api'", specifier = ">=0.19.0" },
+    { name = "moto", extras = ["s3", "sqs", "iot"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14.0" },
+    { name = "mypy", marker = "extra == 'sandbox'", specifier = ">=1.14.0" },
+    { name = "pydantic", specifier = ">=2.10.0" },
+    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'api'", specifier = ">=2.10.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.25.0" },
+    { name = "restrictedpython", marker = "extra == 'sandbox'", specifier = ">=7.4" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
+    { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
+]
+provides-extras = ["api", "sandbox", "infra", "dev"]
+
+[[package]]
 name = "librt"
 version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
@@ -720,62 +776,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/a2/6e/371856a3fb9d31ca8
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505", size = 4963, upload-time = "2025-04-22T14:54:22.983Z" },
 ]
-
-[[package]]
-name = "oochy"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "boto3" },
-    { name = "httpx" },
-    { name = "pydantic" },
-]
-
-[package.optional-dependencies]
-api = [
-    { name = "fastapi" },
-    { name = "mangum" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "uvicorn" },
-]
-dev = [
-    { name = "moto", extra = ["s3"] },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-infra = [
-    { name = "aws-cdk-lib" },
-    { name = "constructs" },
-]
-sandbox = [
-    { name = "mypy" },
-    { name = "restrictedpython" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.52.0" },
-    { name = "aws-cdk-lib", marker = "extra == 'infra'", specifier = ">=2.180.0" },
-    { name = "boto3", specifier = ">=1.35.0" },
-    { name = "constructs", marker = "extra == 'infra'", specifier = ">=10.4.0" },
-    { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "mangum", marker = "extra == 'api'", specifier = ">=0.19.0" },
-    { name = "moto", extras = ["s3", "sqs", "iot"], marker = "extra == 'dev'", specifier = ">=5.0.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.14.0" },
-    { name = "mypy", marker = "extra == 'sandbox'", specifier = ">=1.14.0" },
-    { name = "pydantic", specifier = ">=2.10.0" },
-    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'api'", specifier = ">=2.10.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.25.0" },
-    { name = "restrictedpython", marker = "extra == 'sandbox'", specifier = ">=7.4" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.0" },
-    { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
-]
-provides-extras = ["api", "sandbox", "infra", "dev"]
 
 [[package]]
 name = "packaging"
