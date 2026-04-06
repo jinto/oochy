@@ -53,3 +53,8 @@ htmlcov/
 .playwright-cli/
 .gstack/
 refs/
+.kittypaw/
+.state/
+kittypaw.db*
+default.profraw
+ENUMALABS_USERAPP.md
