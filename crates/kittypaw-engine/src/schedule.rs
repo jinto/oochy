@@ -279,6 +279,24 @@ impl NotificationSender {
             name, delay_secs, failures
         ));
     }
+
+    fn notify_fix_applied(&self, name: &str, error: &str, fix_id: i64) {
+        self.send(&format!(
+            "🔧 *{}* 자동 수정 적용됨\n에러: {}\n`kittypaw fixes show {}`",
+            name,
+            error.chars().take(100).collect::<String>(),
+            fix_id
+        ));
+    }
+
+    fn notify_fix_pending(&self, name: &str, error: &str, fix_id: i64) {
+        self.send(&format!(
+            "🔧 *{}* 수정안 생성됨 (승인 대기)\n에러: {}\n`kittypaw fixes approve {}`",
+            name,
+            error.chars().take(100).collect::<String>(),
+            fix_id
+        ));
+    }
 }
 
 fn append_execution_log(
@@ -485,21 +503,30 @@ fn handle_run_success(
     }
 }
 
+/// Result of an auto-fix attempt.
+struct AutoFixResult {
+    fix_id: i64,
+    applied: bool,
+}
+
 /// Attempt to auto-fix a broken skill using LLM code generation.
-/// Returns Some(fix_summary) on success, None on failure or skip.
+/// In Full mode: applies immediately. In Supervised mode: records for approval.
+/// Returns Some(AutoFixResult) on success, None on failure or skip.
 async fn attempt_auto_fix(
     skill_id: &str,
     error_msg: &str,
     config: &kittypaw_core::config::Config,
     sandbox: &kittypaw_sandbox::sandbox::Sandbox,
-) -> Option<String> {
-    // Only in Full autonomy mode
-    if config.autonomy_level != kittypaw_core::config::AutonomyLevel::Full {
+    db_path: &str,
+) -> Option<AutoFixResult> {
+    // Only in Full or Supervised autonomy mode
+    let is_full = config.autonomy_level == kittypaw_core::config::AutonomyLevel::Full;
+    if config.autonomy_level == kittypaw_core::config::AutonomyLevel::Readonly {
         return None;
     }
 
     // Load current skill code
-    let (_skill, current_code) = match kittypaw_core::skill::load_skill(skill_id) {
+    let (_skill, old_code) = match kittypaw_core::skill::load_skill(skill_id) {
         Ok(Some(pair)) => pair,
         _ => return None,
     };
@@ -540,22 +567,59 @@ async fn attempt_auto_fix(
     // Generate fix via teach_loop
     let fix_prompt = format!(
         "Fix this KittyPaw skill that failed with error: {}\n\nSkill name: {}\n\nCurrent code:\n```javascript\n{}\n```\n\nWrite the corrected code. Keep the same logic, only fix the error.",
-        error_msg, skill_id, current_code
+        error_msg, skill_id, old_code
     );
 
     match crate::teach_loop::handle_teach(&fix_prompt, "auto-fix", &*provider, sandbox, config)
         .await
     {
-        Ok(ref result @ crate::teach_loop::TeachResult::Generated { ref skill_name, .. }) => {
-            match crate::teach_loop::approve_skill(result) {
-                Ok(()) => {
-                    tracing::info!("Auto-fix applied for skill '{skill_id}'");
-                    Some(format!("Skill '{}' auto-fixed", skill_name))
-                }
+        Ok(ref result @ crate::teach_loop::TeachResult::Generated { ref code, .. }) => {
+            let new_code = code.clone();
+            let error_short = error_msg.chars().take(500).collect::<String>();
+
+            // Open store for recording the fix
+            let store = match kittypaw_store::Store::open(db_path) {
+                Ok(s) => s,
                 Err(e) => {
-                    tracing::warn!("Auto-fix save failed for '{skill_id}': {e}");
-                    None
+                    tracing::warn!("Cannot open store for fix recording: {e}");
+                    // Still try to apply in full mode even without recording
+                    if is_full {
+                        let _ = crate::teach_loop::approve_skill(result);
+                    }
+                    return None;
                 }
+            };
+
+            if is_full {
+                // Full mode: apply immediately
+                match crate::teach_loop::approve_skill(result) {
+                    Ok(()) => {
+                        let fix_id = store
+                            .record_fix(skill_id, &error_short, &old_code, &new_code, true)
+                            .unwrap_or(0);
+                        tracing::info!("Auto-fix applied for skill '{skill_id}' (fix #{fix_id})");
+                        Some(AutoFixResult {
+                            fix_id,
+                            applied: true,
+                        })
+                    }
+                    Err(e) => {
+                        tracing::warn!("Auto-fix save failed for '{skill_id}': {e}");
+                        None
+                    }
+                }
+            } else {
+                // Supervised mode: record but don't apply
+                let fix_id = store
+                    .record_fix(skill_id, &error_short, &old_code, &new_code, false)
+                    .unwrap_or(0);
+                tracing::info!(
+                    "Auto-fix generated for skill '{skill_id}' (fix #{fix_id}, pending approval)"
+                );
+                Some(AutoFixResult {
+                    fix_id,
+                    applied: false,
+                })
             }
         }
         _ => {
@@ -696,17 +760,25 @@ async fn execute_scheduled_skill(
                     .flatten()
                     .unwrap_or_default();
                 if failures == 2 && !hint.contains("|auto_fix_attempted") {
-                    if let Some(fix_msg) =
-                        attempt_auto_fix(&skill.name, &error_msg, config, sandbox).await
+                    if let Some(fix_result) =
+                        attempt_auto_fix(&skill.name, &error_msg, config, sandbox, db_path).await
                     {
-                        reset_failure_count(db_path, &skill.name).ok();
-                        let _ = store.set_user_context(
-                            &format!("failure_hint:{}", skill.name),
-                            "",
-                            "auto_fixed",
-                        );
-                        notifier.notify_recovery(&skill.name);
-                        tracing::info!("Auto-fix succeeded: {fix_msg}");
+                        if fix_result.applied {
+                            reset_failure_count(db_path, &skill.name).ok();
+                            let _ = store.set_user_context(
+                                &format!("failure_hint:{}", skill.name),
+                                "",
+                                "auto_fixed",
+                            );
+                            notifier.notify_fix_applied(&skill.name, &error_msg, fix_result.fix_id);
+                        } else {
+                            notifier.notify_fix_pending(&skill.name, &error_msg, fix_result.fix_id);
+                            let _ = store.set_user_context(
+                                &format!("failure_hint:{}", skill.name),
+                                &format!("{hint}|auto_fix_attempted"),
+                                "auto",
+                            );
+                        }
                     } else {
                         let _ = store.set_user_context(
                             &format!("failure_hint:{}", skill.name),

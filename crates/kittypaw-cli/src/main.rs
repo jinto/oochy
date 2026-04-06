@@ -85,6 +85,11 @@ enum Commands {
         #[command(subcommand)]
         command: SuggestionsCommands,
     },
+    /// View and manage auto-fix history
+    Fixes {
+        #[command(subcommand)]
+        command: FixesCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -138,6 +143,25 @@ enum SuggestionsCommands {
     Dismiss {
         /// Skill ID to dismiss
         skill_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum FixesCommands {
+    /// List fixes for a skill
+    List {
+        /// Skill ID (omit to see usage hint)
+        skill_id: Option<String>,
+    },
+    /// Show fix details (old vs new code)
+    Show {
+        /// Fix ID
+        fix_id: i64,
+    },
+    /// Approve and apply a pending fix
+    Approve {
+        /// Fix ID
+        fix_id: i64,
     },
 }
 
@@ -280,6 +304,13 @@ async fn main() {
             SuggestionsCommands::Dismiss { skill_id } => {
                 commands::suggestions::run_suggestions_dismiss(&skill_id)
             }
+        },
+        Some(Commands::Fixes { command }) => match command {
+            FixesCommands::List { skill_id } => {
+                commands::fixes::run_fixes_list(skill_id.as_deref())
+            }
+            FixesCommands::Show { fix_id } => commands::fixes::run_fixes_show(fix_id),
+            FixesCommands::Approve { fix_id } => commands::fixes::run_fixes_approve(fix_id),
         },
         None => {
             commands::chat::run_stdin().await;

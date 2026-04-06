@@ -95,6 +95,8 @@ pub(crate) fn build_api_router(api_key: &str, state: ApiState) -> Option<Router>
         .route("/api/v1/skills/{name}", delete(api_skills_delete))
         .route("/api/v1/chat", post(api_chat))
         .route("/api/v1/config/check", get(api_config_check))
+        .route("/api/v1/skills/{id}/fixes", get(api_skill_fixes))
+        .route("/api/v1/fixes/{id}/approve", post(api_fix_approve))
         .route("/api/v1/suggestions", get(api_suggestions_list))
         .route(
             "/api/v1/suggestions/{skill_id}/accept",
@@ -357,6 +359,51 @@ async fn api_config_check(State(st): State<ApiState>) -> Json<Value> {
             "daily_token_limit": st.config.features.daily_token_limit,
         }
     }))
+}
+
+// ── Fix endpoints ────────────────────────────────────────────────────
+
+async fn api_skill_fixes(State(st): State<ApiState>, Path(id): Path<String>) -> Json<Value> {
+    let s = st.store.lock().await;
+    match s.list_fixes(&id) {
+        Ok(fixes) => {
+            let items: Vec<Value> = fixes
+                .iter()
+                .map(|f| {
+                    json!({
+                        "id": f.id,
+                        "skill_id": f.skill_id,
+                        "error_msg": f.error_msg,
+                        "applied": f.applied,
+                        "created_at": f.created_at,
+                    })
+                })
+                .collect();
+            Json(json!(items))
+        }
+        Err(e) => Json(json!({"error": format!("{e}")})),
+    }
+}
+
+async fn api_fix_approve(
+    State(st): State<ApiState>,
+    Path(id): Path<i64>,
+) -> (StatusCode, Json<Value>) {
+    let s = st.store.lock().await;
+    match s.apply_fix(id) {
+        Ok(true) => (
+            StatusCode::OK,
+            Json(json!({"approved": true, "fix_id": id})),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "fix not found or already applied"})),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("{e}")})),
+        ),
+    }
 }
 
 // ── Suggestion endpoints ─────────────────────────────────────────────
