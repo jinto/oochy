@@ -134,8 +134,17 @@
 ### 멀티채널 — 결과 알림으로
 - [x] Slack 채널 어댑터 (Channel trait + skill executor + Settings UI)
 - [x] Discord 채널 어댑터 (Channel trait + skill executor + Settings UI)
+- [x] 온보딩 텔레그램 연결 (BotFather 가이드 + 채팅 ID 자동 감지 + 환영 메시지)
+- [x] Telegram chat_id 자동 해결 (Design Principle #6: 하드코딩 금지)
 - [ ] 카카오톡 연동
 - [ ] 크로스 채널 컨텍스트 (사용자 ID 기반 통합)
+- [ ] 채널 추가 시 7파일 터치 → 레지스트리 패턴으로 리팩터 (10개+ 채널 시)
+
+### 파일 접근 보안
+- [ ] 온보딩 폴더 접근 제어: "작업 폴더를 선택해주세요" 단계 추가
+- [ ] FilePermissionChecker를 File.read/write/edit에 실제 연결 (인프라는 존재)
+- [ ] SandboxConfig::allowed_paths 활성화
+- [ ] macOS NSOpenPanel + Security-Scoped Bookmarks 통합
 
 ### 커뮤니티 스킬 마켓플레이스
 - [x] kittypaw-skills/registry GitHub 레포 생성 + index.json + 5개 스킬
@@ -205,6 +214,9 @@
 - [x] 다국어 i18n (ko/en): 42개 UI 문자열 + Settings 언어 선택
 - [x] 마이크 음성입력: kittypaw-mic Swift 헬퍼 + SFSpeechRecognizer 실시간 전사
 - [x] 네이티브 키보드 단축키: use_global_shortcut (⌘R 음성, ⌘⌫ 삭제)
+- [x] GUI Chat → agent_loop 전환 (LLM이 프리미티브 직접 사용, assistant.rs → AgentSession)
+- [x] Desktop/CLI admin 권한 수정 (is_admin_event + teach_loop)
+- [x] Design Principle #6: 하드코딩 금지 (VISION.md에 기록)
 - [ ] /daily 모닝 브리핑 (Todoist + Calendar)
 
 ---
