@@ -3,7 +3,6 @@ use dioxus::prelude::*;
 use super::{chat, dashboard, onboarding, permission_dialog, settings, sidebar, skill_gallery};
 use crate::i18n::{I18n, Locale};
 use crate::state::{AppState, PermissionQueue};
-use kittypaw_channels::channel::Channel;
 
 #[component]
 pub fn App() -> Element {
@@ -29,39 +28,35 @@ pub fn App() -> Element {
         });
     }
 
-    // Start Telegram polling in background (so bot responds even without `kittypaw serve`)
+    // Start channel polling in background (so bot responds even without `kittypaw serve`)
     {
         let state = app_state.clone();
         use_effect(move || {
             let state = state.clone();
             spawn(async move {
                 let config = kittypaw_core::config::Config::load().unwrap_or_default();
-                let tg_token = config
-                    .channels
-                    .iter()
-                    .find(|c| c.channel_type == kittypaw_core::config::ChannelType::Telegram)
-                    .map(|c| c.token.clone())
-                    .or_else(|| {
-                        kittypaw_core::secrets::get_secret("telegram", "bot_token")
-                            .ok()
-                            .flatten()
-                    })
-                    .unwrap_or_default();
-                if tg_token.is_empty() {
+                let channels =
+                    kittypaw_channels::registry::ChannelRegistry::create_all(&config.channels);
+                if channels.is_empty() {
                     return;
                 }
 
-                tracing::info!("Starting background Telegram polling from GUI");
-                let channel = kittypaw_channels::telegram::TelegramChannel::new(&tg_token);
+                tracing::info!(
+                    count = channels.len(),
+                    "Starting background channel polling from GUI"
+                );
                 let (event_tx, mut event_rx) =
                     tokio::sync::mpsc::channel::<kittypaw_core::types::Event>(64);
 
-                // Spawn polling
-                tokio::spawn(async move {
-                    if let Err(e) = channel.start(event_tx).await {
-                        tracing::error!("Telegram polling error: {e}");
-                    }
-                });
+                // Spawn polling for each configured channel
+                for channel in channels {
+                    let tx = event_tx.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = channel.start(tx).await {
+                            tracing::error!("Channel polling error: {e}");
+                        }
+                    });
+                }
 
                 // Process incoming Telegram messages
                 while let Some(event) = event_rx.recv().await {
