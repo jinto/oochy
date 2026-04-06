@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 const PLIST_LABEL: &str = "com.kittypaw.daemon";
+const SYSTEMD_UNIT: &str = "kittypaw.service";
 
 fn home_dir() -> PathBuf {
     std::env::var("HOME")
@@ -20,14 +21,28 @@ fn plist_path() -> PathBuf {
         .join(format!("{PLIST_LABEL}.plist"))
 }
 
+fn systemd_user_dir() -> PathBuf {
+    home_dir().join(".config/systemd/user")
+}
+
+fn systemd_unit_path() -> PathBuf {
+    systemd_user_dir().join(SYSTEMD_UNIT)
+}
+
 fn kittypaw_dir() -> PathBuf {
     kittypaw_core::secrets::data_dir().unwrap_or_else(|_| PathBuf::from(".kittypaw"))
 }
 
 pub(crate) fn run_daemon_install() {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
-        eprintln!("Daemon install is only supported on macOS.");
+        install_systemd();
+        return;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        eprintln!("Daemon install is only supported on macOS and Linux.");
         return;
     }
 
@@ -87,10 +102,83 @@ pub(crate) fn run_daemon_install() {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn install_systemd() {
+    let bin_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("kittypaw"));
+    let kp_dir = kittypaw_dir();
+    std::fs::create_dir_all(&kp_dir).ok();
+
+    let unit = format!(
+        r#"[Unit]
+Description=KittyPaw AI Automation Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={} serve
+Restart=on-failure
+RestartSec=5
+WorkingDirectory={}
+Environment=KITTYPAW_LOG_FORMAT=json
+
+[Install]
+WantedBy=default.target
+"#,
+        bin_path.display(),
+        kp_dir.display(),
+    );
+
+    let dir = systemd_user_dir();
+    std::fs::create_dir_all(&dir).ok();
+    let path = systemd_unit_path();
+
+    match std::fs::write(&path, &unit) {
+        Ok(()) => {
+            println!("Unit file written to {}", path.display());
+            let _ = std::process::Command::new("systemctl")
+                .args(["--user", "daemon-reload"])
+                .status();
+            let status = std::process::Command::new("systemctl")
+                .args(["--user", "enable", "--now", SYSTEMD_UNIT])
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("Daemon installed and started."),
+                Ok(s) => eprintln!("systemctl enable exited with: {s}"),
+                Err(e) => eprintln!("Failed to run systemctl: {e}"),
+            }
+        }
+        Err(e) => eprintln!("Failed to write unit file: {e}"),
+    }
+}
+
 pub(crate) fn run_daemon_uninstall() {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
-        eprintln!("Daemon uninstall is only supported on macOS.");
+        let path = systemd_unit_path();
+        if path.exists() {
+            match std::process::Command::new("systemctl")
+                .args(["--user", "disable", "--now", SYSTEMD_UNIT])
+                .status()
+            {
+                Ok(s) if !s.success() => {
+                    eprintln!("Warning: systemctl disable exited with: {s}");
+                }
+                Err(e) => eprintln!("Warning: failed to run systemctl: {e}"),
+                _ => {}
+            }
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    let _ = std::process::Command::new("systemctl")
+                        .args(["--user", "daemon-reload"])
+                        .status();
+                    println!("Daemon uninstalled.");
+                }
+                Err(e) => eprintln!("Failed to remove unit file: {e}"),
+            }
+        } else {
+            println!("Daemon is not installed.");
+        }
         return;
     }
 
@@ -110,18 +198,41 @@ pub(crate) fn run_daemon_uninstall() {
             println!("Daemon is not installed.");
         }
     }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    eprintln!("Daemon is not supported on this platform.");
 }
 
 pub(crate) fn run_daemon_status() {
-    let path = plist_path();
-    if !path.exists() {
-        println!("Daemon: not installed");
+    #[cfg(target_os = "linux")]
+    {
+        let path = systemd_unit_path();
+        if !path.exists() {
+            println!("Daemon: not installed");
+            return;
+        }
+        println!("Unit: {}", path.display());
+        let output = std::process::Command::new("systemctl")
+            .args(["--user", "is-active", SYSTEMD_UNIT])
+            .output();
+        match output {
+            Ok(out) => {
+                let status = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                println!("Status: {status}");
+            }
+            Err(_) => println!("Status: unknown (systemctl failed)"),
+        }
         return;
     }
-    println!("Plist: {}", path.display());
 
     #[cfg(target_os = "macos")]
     {
+        let path = plist_path();
+        if !path.exists() {
+            println!("Daemon: not installed");
+            return;
+        }
+        println!("Plist: {}", path.display());
         let output = std::process::Command::new("launchctl")
             .args(["list"])
             .output();
@@ -138,6 +249,6 @@ pub(crate) fn run_daemon_status() {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
-    println!("Status: not supported on this platform");
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    println!("Daemon: not supported on this platform");
 }

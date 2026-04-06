@@ -169,6 +169,32 @@ impl<'a> ResponseRouter<'a> {
     }
 }
 
+fn pid_file_path() -> std::path::PathBuf {
+    kittypaw_core::secrets::data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from(".kittypaw"))
+        .join("kittypaw.pid")
+}
+
+fn write_pid_file() {
+    let path = pid_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let pid = std::process::id();
+    if let Err(e) = std::fs::write(&path, pid.to_string()) {
+        tracing::warn!("Failed to write PID file: {e}");
+    } else {
+        tracing::info!("PID file written: {} (pid={})", path.display(), pid);
+    }
+}
+
+fn remove_pid_file() {
+    let path = pid_file_path();
+    if path.exists() {
+        std::fs::remove_file(&path).ok();
+    }
+}
+
 pub(crate) async fn run_serve(bind_addr: &str) {
     let config = kittypaw_core::config::Config::load().unwrap_or_else(|e| {
         eprintln!("Config error: {e}");
@@ -192,6 +218,9 @@ pub(crate) async fn run_serve(bind_addr: &str) {
     let (default_provider, fallback_provider) =
         super::helpers::require_provider_with_fallback(&config);
 
+    // Track server start time for health endpoint
+    let start_time = std::time::Instant::now();
+
     // Build dashboard routes (unauthenticated — backward compat)
     let dashboard_store = store.clone();
     let mut extra = axum::Router::new()
@@ -199,7 +228,18 @@ pub(crate) async fn run_serve(bind_addr: &str) {
         .route("/api/status", get(api_status))
         .route("/api/executions", get(api_executions))
         .route("/api/agents", get(api_agents))
-        .with_state(dashboard_store);
+        .with_state(dashboard_store)
+        .route(
+            "/api/v1/health",
+            get(move || async move {
+                let uptime_secs = start_time.elapsed().as_secs();
+                axum::Json(serde_json::json!({
+                    "status": "ok",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "uptime_secs": uptime_secs,
+                }))
+            }),
+        );
 
     // Conditionally mount authenticated REST API at /api/v1/*
     let api_state = super::api::ApiState {
@@ -235,6 +275,9 @@ pub(crate) async fn run_serve(bind_addr: &str) {
             }
         });
     }
+
+    // All services started — write PID file now (not before, to avoid stale PIDs on startup failure)
+    write_pid_file();
 
     eprintln!(
         "kittypaw serve started. WebSocket at ws://{}/ws/chat",
@@ -331,6 +374,9 @@ pub(crate) async fn run_serve(bind_addr: &str) {
             }
         }
     }
+
+    remove_pid_file();
+    tracing::info!("Server stopped.");
 }
 
 pub(crate) async fn send_telegram_message(
