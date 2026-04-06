@@ -223,6 +223,8 @@
 - [x] kittypaw.toml 경로: ~/.kittypaw/kittypaw.toml 우선, ./kittypaw.toml fallback
 - [x] 온보딩 작업 폴더 선택 + 텔레그램 BotFather 가이드 + 채팅ID 자동 감지
 - [x] 온보딩 순서: 환영 → LLM → 텔레그램 → 작업폴더 → 완료
+- [x] Skill.create 프리미티브: LLM이 자동으로 스킬 생성+스케줄 등록 (Hermes skill_manage 패턴)
+- [ ] serve.rs → agent_loop 전환 (텔레그램에서도 Skill.create 동작하게)
 - [ ] /daily 모닝 브리핑 (Todoist + Calendar)
 
 ---
