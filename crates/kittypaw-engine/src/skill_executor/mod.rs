@@ -4,7 +4,10 @@ mod env;
 mod file;
 mod git;
 mod http;
+mod image;
 mod llm;
+mod memory;
+mod moa;
 mod process;
 mod shell;
 mod skill_mgmt;
@@ -271,6 +274,16 @@ async fn resolve_skill_call_inner(
         };
     }
 
+    // Memory calls need Store access
+    if call.skill_name == "Memory" {
+        let s = store.lock().await;
+        return match memory::execute_memory(call, &s, None) {
+            Ok(val) => serde_json::to_string(&val).unwrap_or_else(|_| "null".to_string()),
+            Err(e) => serde_json::to_string(&serde_json::json!({"error": e.to_string()}))
+                .unwrap_or_else(|_| "null".to_string()),
+        };
+    }
+
     let llm_call_count = AtomicU32::new(0);
     let result = execute_single_call(
         call,
@@ -327,6 +340,7 @@ fn is_read_only_skill_call(call: &SkillCall) -> bool {
             | ("Git", "status")
             | ("Git", "diff")
             | ("Git", "log")
+            | ("Memory", "recall")
     )
 }
 
@@ -503,6 +517,9 @@ async fn execute_single_call(
         "Agent" => agent::execute_agent(call, config).await,
         "Skill" => skill_mgmt::execute_skill_mgmt(call).await,
         "Tts" => tts::execute_tts(call).await,
+        "Moa" => moa::execute_moa(call, config).await,
+        "Image" => image::execute_image(call, config).await,
+        "Vision" => image::execute_vision(call, config).await,
         _ => Err(KittypawError::CapabilityDenied(format!(
             "Unknown skill: {}",
             call.skill_name

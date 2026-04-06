@@ -49,6 +49,10 @@ pub(crate) const KNOWN_SKILLS: &[(&str, &[&str])] = &[
     ("Agent", &["delegate"]),
     ("Skill", &["create", "list", "delete"]),
     ("Tts", &["speak"]),
+    ("Memory", &["save", "recall", "user"]),
+    ("Moa", &["query"]),
+    ("Image", &["generate"]),
+    ("Vision", &["analyze"]),
 ];
 
 /// Run QuickJS using AsyncRuntime + AsyncContext (avoids RefCell borrow conflicts).

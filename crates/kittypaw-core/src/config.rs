@@ -52,6 +52,28 @@ pub struct Config {
     /// Server settings for the HTTP API.
     #[serde(default)]
     pub server: ServerConfig,
+    /// Profile configurations.
+    #[serde(default)]
+    pub profiles: Vec<ProfileConfig>,
+    /// Default profile name (used when no channel/session mapping matches).
+    #[serde(default = "default_profile_name")]
+    pub default_profile: String,
+}
+
+fn default_profile_name() -> String {
+    "default".to_string()
+}
+
+/// Profile configuration — each profile has its own SOUL.md, USER.md, and memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileConfig {
+    pub id: String,
+    /// Display name / nickname (e.g., "키티", "비서")
+    #[serde(default)]
+    pub nick: String,
+    /// Channels that auto-bind to this profile (e.g., ["slack", "discord"])
+    #[serde(default)]
+    pub channels: Vec<String>,
 }
 
 /// Server configuration for the HTTP API layer.
@@ -307,6 +329,15 @@ impl Config {
             }
         }
 
+        // Ensure default profile exists on disk
+        let default_nick = config
+            .profiles
+            .iter()
+            .find(|p| p.id == config.default_profile)
+            .map(|p| p.nick.as_str())
+            .unwrap_or("");
+        crate::profile::ensure_default_profile(default_nick);
+
         Ok(config)
     }
 }
@@ -337,6 +368,8 @@ impl Default for Config {
             autonomy_level: AutonomyLevel::default(),
             paired_chat_ids: vec![],
             server: ServerConfig::default(),
+            profiles: vec![],
+            default_profile: default_profile_name(),
         }
     }
 }

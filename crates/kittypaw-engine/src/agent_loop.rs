@@ -57,6 +57,13 @@ pub const SYSTEM_PROMPT: &str = r#"You are KittyPaw, an AI agent that helps user
   Example: Skill.create("daily-news", "뉴스 요약", "const n = await Web.search('news'); return n;", "schedule", "0 0 7 * * *")
 - Skill.list() — List all saved skills
 - Skill.delete(name) — Delete a skill
+- Memory.save(key, value) — Save a fact to persistent memory
+- Memory.recall(query) — Recall memories matching a prefix query (empty = all)
+- Memory.user(key, value) — Update user profile (USER.md). Use for persistent preferences.
+  Example: Memory.user("interests", "AI, 스타트업")
+- Moa.query(prompt) — Mixture of Agents: query all configured models in parallel and aggregate the best answer
+- Image.generate(prompt) — Generate an image from text description, returns { url }
+- Vision.analyze(imageUrl, prompt?) — Analyze an image, returns { analysis }
 - console.log(...args) — Log output (for debugging)
 
 ## When to create a skill
@@ -69,6 +76,17 @@ When a user asks you to do something (e.g., "뉴스 브리핑 보내줘"), actua
 2. Process/summarize using Llm.generate if needed
 3. Send the actual content via Telegram.sendMessage
 Do NOT just return "전송했습니다" without actually fetching and sending real data.
+
+## Clarification
+When a request is ambiguous, ask a clarifying question in natural language BEFORE executing.
+Example: User says "뉴스 보내줘" → return "어떤 분야의 뉴스를 원하시나요? (AI, 경제, 스타트업 등)"
+The user's next message will contain the answer. Use it to proceed.
+
+## Memory & Learning
+When you learn something about the user (preferences, interests, corrections):
+- Use Memory.user(key, value) to save it to their profile
+- This reduces future clarification needs
+- Most valuable memories: things that prevent the user from having to remind you again
 "#;
 
 const MAX_RETRIES: usize = 3;
@@ -260,7 +278,20 @@ async fn run_agent_loop_inner(
         } else {
             crate::compaction::compaction_for_attempt(attempt)
         };
-        let mut messages = build_prompt(&state, &event_text, &compaction);
+        // Resolve active profile for this agent
+        let active_profile_override = {
+            let s = store.lock().await;
+            let key = format!("active_profile:{}", agent_id);
+            s.get_user_context(&key).ok().flatten()
+        };
+        let mut messages = build_prompt(
+            &state,
+            &event_text,
+            &compaction,
+            config,
+            channel_name,
+            active_profile_override.as_deref(),
+        );
         let reason = TransitionReason::PromptBuilt {
             message_count: messages.len(),
         };
@@ -544,6 +575,9 @@ fn build_prompt(
     state: &AgentState,
     event_text: &str,
     config: &crate::compaction::CompactionConfig,
+    app_config: &kittypaw_core::config::Config,
+    channel_type: &str,
+    active_profile_override: Option<&str>,
 ) -> Vec<LlmMessage> {
     use crate::compaction::{compact_turns, CompactionMode};
 
@@ -551,6 +585,41 @@ fn build_prompt(
         role: Role::System,
         content: SYSTEM_PROMPT.to_string(),
     }];
+
+    // Inject profile (SOUL.md + USER.md)
+    {
+        let profile_name = kittypaw_core::profile::resolve_profile_name(
+            app_config,
+            channel_type,
+            active_profile_override,
+        );
+        let profile = kittypaw_core::profile::load_profile(&profile_name);
+        let nick = app_config
+            .profiles
+            .iter()
+            .find(|p| p.id == profile_name)
+            .map(|p| p.nick.as_str())
+            .unwrap_or("");
+
+        if !profile.soul.is_empty() {
+            messages.push(LlmMessage {
+                role: Role::System,
+                content: format!("## Your Identity (SOUL.md)\n{}", profile.soul),
+            });
+        }
+        if !nick.is_empty() {
+            messages.push(LlmMessage {
+                role: Role::System,
+                content: format!("Your name/nickname is: {nick}"),
+            });
+        }
+        if !profile.user_md.is_empty() {
+            messages.push(LlmMessage {
+                role: Role::System,
+                content: format!("## User Profile (USER.md)\n{}", profile.user_md),
+            });
+        }
+    }
 
     // Inject connected channel info so LLM can use Telegram/Slack/Discord directly
     {
@@ -656,7 +725,8 @@ async fn try_handle_command(
              /run <스킬이름> — 스킬 즉시 실행\n\
              /status — 오늘 실행 통계\n\
              /teach <설명> — 새 스킬 가르치기\n\
-             /link <유저ID> — 이 채널을 유저 ID에 연결 (크로스채널 대화 공유)\n\
+             /profile [이름] — 프로필 전환/목록\n\
+             /link <유저ID> — 크로스채널 대화 공유\n\
              /help — 도움말\n\n\
              자연어 메시지를 보내면 AI가 직접 처리합니다."
                 .to_string())),
@@ -720,6 +790,77 @@ async fn try_handle_command(
                         "✅ {channel}:{channel_user_id} → {global_user_id} 연결 완료.\n\
                          이제 연결된 채널에서 동일한 대화 기록을 공유합니다."
                     ))),
+                    Err(e) => Some(Err(e)),
+                }
+            }
+
+            _ if trimmed.starts_with("/profile") => {
+                let profile_name = trimmed.strip_prefix("/profile").unwrap().trim();
+                if profile_name.is_empty() {
+                    let list: Vec<String> = config
+                        .profiles
+                        .iter()
+                        .map(|p| {
+                            if p.nick.is_empty() {
+                                p.id.clone()
+                            } else {
+                                format!("{} ({})", p.id, p.nick)
+                            }
+                        })
+                        .collect();
+                    return Some(Ok(format!(
+                        "프로필 목록: {}\n\n전환: /profile <이름>",
+                        if list.is_empty() {
+                            "default".to_string()
+                        } else {
+                            list.join(", ")
+                        }
+                    )));
+                }
+                // Find by id or nick
+                let resolved = config
+                    .profiles
+                    .iter()
+                    .find(|p| {
+                        p.id.eq_ignore_ascii_case(profile_name)
+                            || p.nick.eq_ignore_ascii_case(profile_name)
+                    })
+                    .map(|p| p.id.clone())
+                    .unwrap_or_else(|| profile_name.to_string());
+
+                let channel_name = match event.event_type {
+                    kittypaw_core::types::EventType::Telegram => "telegram",
+                    kittypaw_core::types::EventType::WebChat => "web",
+                    kittypaw_core::types::EventType::Desktop => "desktop",
+                };
+                // Resolve agent_id the same way as run_agent_loop_inner (cross-channel aware)
+                let agent_id = {
+                    let s2 = store.lock().await;
+                    let cuid = event.session_id();
+                    match s2.resolve_user(channel_name, &cuid) {
+                        Ok(Some(gid)) => format!("user-{gid}"),
+                        _ => format!("{channel_name}-{cuid}"),
+                    }
+                };
+                let key = format!("active_profile:{}", agent_id);
+                let s = store.lock().await;
+                match s.set_user_context(&key, &resolved, "user") {
+                    Ok(()) => {
+                        let nick =
+                            config
+                                .profiles
+                                .iter()
+                                .find(|p| p.id == resolved)
+                                .and_then(|p| {
+                                    if p.nick.is_empty() {
+                                        None
+                                    } else {
+                                        Some(p.nick.as_str())
+                                    }
+                                });
+                        let display = nick.unwrap_or(&resolved);
+                        Some(Ok(format!("프로필 전환: {display}")))
+                    }
                     Err(e) => Some(Err(e)),
                 }
             }
