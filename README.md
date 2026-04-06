@@ -117,8 +117,33 @@ cargo run -p kittypaw-cli -- init
 # 스킬 생성
 cargo run -p kittypaw-cli -- teach "설명"
 
-# 봇 서버 시작 (텔레그램 + 스케줄러)
+# 봇 서버 시작 (텔레그램 + 스케줄러 + REST API)
 cargo run -p kittypaw-cli -- serve
+```
+
+### 원격 모드
+
+VPS에 `kittypaw serve`를 띄우고, 로컬에서 원격 제어:
+
+```bash
+# 환경변수로 설정
+export KITTYPAW_REMOTE_URL=http://vps:3000
+export KITTYPAW_SERVER_API_KEY=your-secret-key
+
+kittypaw status
+kittypaw skills list
+kittypaw run my-skill
+kittypaw teach "매일 아침 뉴스 요약해줘"
+
+# 또는 --remote 플래그
+kittypaw --remote http://vps:3000 status
+```
+
+서버 측 `kittypaw.toml`에 API 키를 설정하면 REST API가 활성화됩니다:
+
+```toml
+[server]
+api_key = "your-secret-key"
 ```
 
 ---
@@ -209,7 +234,7 @@ cargo fmt                 # 포맷
 | `kittypaw-engine` | 런타임 엔진 (agent loop, 스킬 실행기, 스케줄러, teach loop) |
 | `kittypaw-workspace` | 파일 관리, 검색, 권한 체커 |
 | `kittypaw-channels` | 텔레그램/슬랙/디스코드 채널 어댑터 |
-| `kittypaw-cli` | CLI 바이너리, 서버 (serve.rs), 대시보드 API |
+| `kittypaw-cli` | CLI 바이너리, 서버 (serve.rs), REST API, 원격 클라이언트 |
 | `kittypaw-gui` | Dioxus 데스크톱 GUI |
 
 ---

@@ -175,7 +175,9 @@ pub(crate) async fn run_serve(bind_addr: &str) {
         std::process::exit(1);
     });
 
-    let sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
+    let sandbox = Arc::new(kittypaw_sandbox::sandbox::Sandbox::new(
+        config.sandbox.clone(),
+    ));
 
     let db_path = db_path();
     let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {
@@ -186,16 +188,32 @@ pub(crate) async fn run_serve(bind_addr: &str) {
     // Bounded mpsc channel for all incoming events
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<kittypaw_core::types::Event>(256);
 
-    // Build dashboard routes
+    // Build LLM providers (needed for API endpoints)
+    let (default_provider, fallback_provider) =
+        super::helpers::require_provider_with_fallback(&config);
+
+    // Build dashboard routes (unauthenticated — backward compat)
     let dashboard_store = store.clone();
-    let extra = axum::Router::new()
+    let mut extra = axum::Router::new()
         .route("/", get(dashboard_html))
         .route("/api/status", get(api_status))
         .route("/api/executions", get(api_executions))
         .route("/api/agents", get(api_agents))
         .with_state(dashboard_store);
 
-    // Start WebSocket channel (with dashboard routes merged)
+    // Conditionally mount authenticated REST API at /api/v1/*
+    let api_state = super::api::ApiState {
+        store: store.clone(),
+        config: Arc::new(config.clone()),
+        provider: default_provider.clone(),
+        fallback_provider: fallback_provider.clone(),
+        sandbox: Arc::clone(&sandbox),
+    };
+    if let Some(api_router) = super::api::build_api_router(&config.server.api_key, api_state) {
+        extra = extra.merge(api_router);
+    }
+
+    // Start WebSocket channel (with dashboard + API routes merged)
     let ws_channel = ServeWebSocketChannel::new(bind_addr);
     let _ws_handle = ws_channel
         .spawn(event_tx.clone(), Some(extra))
@@ -229,7 +247,7 @@ pub(crate) async fn run_serve(bind_addr: &str) {
     let schedule_sandbox = kittypaw_sandbox::sandbox::Sandbox::new(config.sandbox.clone());
     let db_path_sched = db_path.clone();
     tokio::spawn(async move {
-        kittypaw_cli::schedule::run_schedule_loop(
+        kittypaw_engine::schedule::run_schedule_loop(
             &schedule_config,
             &schedule_sandbox,
             &db_path_sched,
@@ -244,10 +262,6 @@ pub(crate) async fn run_serve(bind_addr: &str) {
         tracing::info!("Shutting down...");
         let _ = shutdown_tx.send(true);
     });
-
-    // Build fallback provider for agent session
-    let (default_provider, fallback_provider) =
-        super::helpers::require_provider_with_fallback(&config);
 
     // Event processing loop
     tracing::info!("Event processing loop started, waiting for events...");
@@ -296,7 +310,7 @@ pub(crate) async fn run_serve(bind_addr: &str) {
                 // AgentSession.run() handles:
                 // - Slash commands (/help, /status, /run, /teach) → fast path
                 // - Natural language → LLM agent loop with full primitives
-                let session = kittypaw_cli::agent_loop::AgentSession {
+                let session = kittypaw_engine::agent_loop::AgentSession {
                     provider: &*default_provider,
                     fallback_provider: fallback_provider.as_deref(),
                     sandbox: &sandbox,

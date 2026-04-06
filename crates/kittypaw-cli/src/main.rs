@@ -6,6 +6,11 @@ mod commands;
 #[derive(Parser)]
 #[command(name = "kittypaw", version)]
 struct Cli {
+    /// Connect to a remote kittypaw server instead of running locally.
+    /// Also settable via KITTYPAW_REMOTE_URL env var.
+    #[arg(long, global = true)]
+    remote: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -139,6 +144,56 @@ async fn main() {
     }
 
     let cli = Cli::parse();
+
+    // Remote mode: delegate supported commands to a remote server
+    if let Some(client) = commands::remote::RemoteClient::from_env(cli.remote.as_deref()) {
+        match &cli.command {
+            Some(Commands::Status) => {
+                client.status().await;
+                return;
+            }
+            Some(Commands::Skills {
+                command: SkillsCommands::List,
+            }) => {
+                client.skills_list().await;
+                return;
+            }
+            Some(Commands::Skills {
+                command: SkillsCommands::Delete { name },
+            }) => {
+                client.skills_delete(name).await;
+                return;
+            }
+            Some(Commands::Run { name, .. }) => {
+                client.run_skill(name).await;
+                return;
+            }
+            Some(Commands::Teach { description }) => {
+                let desc = description.join(" ");
+                client.teach(&desc).await;
+                return;
+            }
+            Some(Commands::Config {
+                command: ConfigCommands::Check,
+            }) => {
+                client.config_check().await;
+                return;
+            }
+            None => {
+                // stdin mode → remote chat
+                let mut line = String::new();
+                if std::io::stdin().read_line(&mut line).is_ok() && !line.trim().is_empty() {
+                    client.chat(line.trim()).await;
+                }
+                return;
+            }
+            _ => {
+                eprintln!(
+                    "Warning: this command is not supported in remote mode, running locally."
+                );
+            }
+        }
+    }
 
     match cli.command {
         Some(Commands::Serve { bind }) => {

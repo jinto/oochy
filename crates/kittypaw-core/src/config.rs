@@ -49,6 +49,21 @@ pub struct Config {
     /// Allowed Telegram chat IDs. Empty = allow all (no pairing).
     #[serde(default)]
     pub paired_chat_ids: Vec<String>,
+    /// Server settings for the HTTP API.
+    #[serde(default)]
+    pub server: ServerConfig,
+}
+
+/// Server configuration for the HTTP API layer.
+///
+/// When `api_key` is set, authenticated REST endpoints are exposed at `/api/v1/*`.
+/// When empty, the API is disabled (only dashboard and WebSocket remain).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ServerConfig {
+    /// API key for authenticating REST requests.
+    /// Override with `KITTYPAW_SERVER_API_KEY` env var.
+    #[serde(default)]
+    pub api_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,6 +295,11 @@ impl Config {
             config.llm.model = model;
         }
 
+        // Layer 2b: Server API key from env
+        if let Ok(key) = std::env::var("KITTYPAW_SERVER_API_KEY") {
+            config.server.api_key = key;
+        }
+
         // Layer 3: Fall back to the local secret store if api_key is still empty
         if config.llm.api_key.is_empty() {
             if let Ok(Some(key)) = crate::secrets::get_secret("settings", "api_key") {
@@ -316,6 +336,7 @@ impl Default for Config {
             mcp_servers: vec![],
             autonomy_level: AutonomyLevel::default(),
             paired_chat_ids: vec![],
+            server: ServerConfig::default(),
         }
     }
 }
