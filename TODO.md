@@ -4,7 +4,7 @@
 - [ ] **온보딩에 검색 API 키 설정 추가** — Web.search 백엔드(Brave/Tavily/Exa) API 키를 온보딩 위자드에서 입력받도록. 키 없으면 DuckDuckGo fallback(제한적) 안내.
 - [x] **Telegram 메시지 길이 제한 처리** — split_telegram_text() 순수 함수로 4096자 자동 분할. core/engine/channels 3곳 적용.
 - [x] **Web.search 쿼리 언어 매칭** — SYSTEM_PROMPT에 "사용자 언어와 같은 언어로 검색 쿼리 생성" 가이드 추가.
-- [ ] **Telegram send 통합** — 3곳 개별 sendMessage 구현을 core::send_message 단일 게이트웨이로 통합 (Architect 권고)
+- [x] **Telegram send 통합** — send_text_chunked() 단일 게이트웨이로 3곳 통합 완료. engine/channels는 1줄 호출로 축소.
 - [ ] **Proactive Memory — 선호도 감지 + 확인 저장** — (A) 명시적 선호도("이렇게 해주면 좋겠어") 감지 → "기억해둘까요?" 확인 후 Memory.user 저장. (B) 암묵적 패턴(3회 이상 같은 요청) → 자동 저장. (C) Compaction 직전 flush_memories (Hermes 패턴) — 시스템 메시지로 "기억할 거 저장해" 강제 호출. 세 가지 하이브리드.
 - [ ] **E2E 테스트 가능한 구조** — serve 없이 텔레그램/WS 채널 → agent_loop → skill executor 전체 파이프라인을 통합 테스트로 검증 가능하도록. 현재 통합 테스트는 agent_loop 직접 호출만 가능, serve 경로(WS 프로토콜, 채널 라우팅)는 미검증. 채널을 mock하거나 in-process serve를 테스트에서 직접 띄우는 구조 필요.
 

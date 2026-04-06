@@ -129,20 +129,33 @@ pub const TELEGRAM_MAX_CHARS: usize = 4096;
 /// 4096 * 10 = ~40KB — practical upper bound for any reasonable message.
 pub const TELEGRAM_MAX_CHUNKS: usize = 10;
 
-/// Send a text message via Telegram Bot API.
-/// Automatically splits messages longer than 4096 characters.
-pub async fn send_message(token: &str, chat_id: &str, text: &str) -> Result<()> {
-    let url = format!("https://api.telegram.org/bot{token}/sendMessage");
-    let client = reqwest::Client::new();
-
+/// Send a text message via Telegram Bot API, auto-splitting if needed.
+///
+/// This is the **single gateway** for all Telegram text sends.  Callers
+/// (engine skill executor, channel adapter, core convenience fn) should
+/// use this instead of reimplementing the split+loop pattern.
+///
+/// Returns the last chunk's API response JSON.
+pub async fn send_text_chunked(
+    client: &reqwest::Client,
+    token: &str,
+    chat_id: &str,
+    text: &str,
+) -> Result<serde_json::Value> {
     let chunks = split_telegram_text(text, TELEGRAM_MAX_CHARS);
 
+    if chunks.is_empty() {
+        return Ok(serde_json::json!({"ok": true}));
+    }
     if chunks.len() > TELEGRAM_MAX_CHUNKS {
         return Err(KittypawError::Skill(format!(
             "메시지가 너무 깁니다 ({} 청크, 최대 {TELEGRAM_MAX_CHUNKS})",
             chunks.len()
         )));
     }
+
+    let url = format!("https://api.telegram.org/bot{token}/sendMessage");
+    let mut last_body = serde_json::json!({"ok": true});
 
     for chunk in &chunks {
         let resp = client
@@ -151,25 +164,36 @@ pub async fn send_message(token: &str, chat_id: &str, text: &str) -> Result<()> 
                 "chat_id": chat_id,
                 "text": chunk,
             }))
-            .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
             .map_err(|e| KittypawError::Skill(format!("Telegram 전송 실패: {e}")))?;
 
-        let body: serde_json::Value = resp
+        let status = resp.status();
+        last_body = resp
             .json()
             .await
             .map_err(|e| KittypawError::Skill(format!("Telegram 응답 파싱 실패: {e}")))?;
 
-        if body["ok"].as_bool() != Some(true) {
+        if !status.is_success() {
+            let err = last_body["description"].as_str().unwrap_or("unknown error");
             return Err(KittypawError::Skill(format!(
-                "Telegram 전송 실패: {}",
-                body["description"].as_str().unwrap_or("unknown error")
+                "Telegram sendMessage error {status}: {err}"
             )));
         }
     }
 
-    Ok(())
+    Ok(last_body)
+}
+
+/// Convenience wrapper: creates a one-off client and discards the response body.
+pub async fn send_message(token: &str, chat_id: &str, text: &str) -> Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    send_text_chunked(&client, token, chat_id, text)
+        .await
+        .map(|_| ())
 }
 
 #[cfg(test)]
