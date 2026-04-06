@@ -138,6 +138,18 @@ impl Channel for TelegramChannel {
                                             .map(|u| u.display_name())
                                             .unwrap_or_else(|| "unknown".to_string());
 
+                                        // Send typing indicator immediately so user knows we received it
+                                        let typing_url = self.api_url("sendChatAction");
+                                        let client = self.client.clone();
+                                        let cid = chat_id;
+                                        tokio::spawn(async move {
+                                            let _ = client
+                                                .post(&typing_url)
+                                                .json(&json!({"chat_id": cid, "action": "typing"}))
+                                                .send()
+                                                .await;
+                                        });
+
                                         let event = Event {
                                             event_type: EventType::Telegram,
                                             payload: json!({
