@@ -3103,6 +3103,7 @@ dependencies = [
  "cron",
  "kittypaw-channels",
  "kittypaw-core",
+ "kittypaw-engine",
  "kittypaw-llm",
  "kittypaw-sandbox",
  "kittypaw-store",
@@ -3135,6 +3136,30 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "kittypaw-engine"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "cron",
+ "kittypaw-core",
+ "kittypaw-llm",
+ "kittypaw-sandbox",
+ "kittypaw-store",
+ "reqwest",
+ "rmcp",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "tracing",
+ "url",
+ "urlencoding",
 ]
 
 [[package]]

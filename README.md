@@ -206,9 +206,10 @@ cargo fmt                 # 포맷
 | `kittypaw-llm` | LLM 클라이언트 (Claude + OpenAI), 레지스트리 |
 | `kittypaw-sandbox` | QuickJS VM + SkillResolver + OS 격리 |
 | `kittypaw-store` | SQLite 저장소 (대화, 스킬 스토리지, 워크스페이스) |
+| `kittypaw-engine` | 런타임 엔진 (agent loop, 스킬 실행기, 스케줄러, teach loop) |
 | `kittypaw-workspace` | 파일 관리, 검색, 권한 체커 |
-| `kittypaw-channels` | 텔레그램 채널 어댑터 |
-| `kittypaw-cli` | CLI 바이너리, teach loop, 스케줄러, 스킬 실행기 |
+| `kittypaw-channels` | 텔레그램/슬랙/디스코드 채널 어댑터 |
+| `kittypaw-cli` | CLI 바이너리, 서버 (serve.rs), 대시보드 API |
 | `kittypaw-gui` | Dioxus 데스크톱 GUI |
 
 ---

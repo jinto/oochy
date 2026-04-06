@@ -5,6 +5,7 @@ members = [
     "crates/kittypaw-llm",
     "crates/kittypaw-sandbox",
     "crates/kittypaw-store",
+    "crates/kittypaw-engine",
     "crates/kittypaw-cli",
     "crates/kittypaw-channels",
     "crates/kittypaw-workspace",
@@ -34,6 +35,7 @@ kittypaw-llm = { path = "crates/kittypaw-llm" }
 kittypaw-sandbox = { path = "crates/kittypaw-sandbox" }
 kittypaw-store = { path = "crates/kittypaw-store" }
 kittypaw-channels = { path = "crates/kittypaw-channels" }
+kittypaw-engine = { path = "crates/kittypaw-engine" }
 kittypaw-workspace = { path = "crates/kittypaw-workspace" }
 
 [profile]
