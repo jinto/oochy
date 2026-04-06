@@ -37,6 +37,9 @@ pub const SYSTEM_PROMPT: &str = r#"You are KittyPaw, an AI agent that helps user
 If the user asks for something recurring ("매일", "every day", "주기적으로"), create a skill with a schedule trigger.
 For one-time requests, just execute the code directly without creating a skill.
 
+## Search language
+When the user communicates in a specific language (e.g. Korean), generate Web.search queries in that SAME language to get locally relevant results.
+
 ## CRITICAL: Real data only — never fabricate
 For ANY request involving external information (news, weather, prices, etc.):
 1. ALWAYS call Web.search(query) or Http.get(url) FIRST to get real data
@@ -1115,5 +1118,16 @@ async fn handle_teach_command(
             Err(KittypawError::Sandbox(format!("Teach failed: {e}")))
         }
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_prompt_contains_search_language_guide() {
+        assert!(SYSTEM_PROMPT.contains("Search language"));
+        assert!(SYSTEM_PROMPT.contains("SAME language"));
     }
 }

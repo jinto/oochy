@@ -84,31 +84,49 @@ pub(super) async fn execute_telegram(
             // ABI: Telegram.sendMessage(chatId, text)
             let (chat_id, text) = require_telegram_args(call, "text")?;
 
-            let url = format!("https://api.telegram.org/bot{bot_token}/sendMessage");
-            let resp = client
-                .post(&url)
-                .json(&serde_json::json!({
-                    "chat_id": chat_id,
-                    "text": text,
-                }))
-                .send()
-                .await
-                .map_err(|e| KittypawError::Skill(format!("Telegram API error: {e}")))?;
+            let chunks = kittypaw_core::telegram::split_telegram_text(
+                &text,
+                kittypaw_core::telegram::TELEGRAM_MAX_CHARS,
+            );
 
-            let status = resp.status();
-            let body: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| KittypawError::Skill(format!("Telegram response parse error: {e}")))?;
-
-            if !status.is_success() {
-                let err = body
-                    .get("description")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown error");
+            if chunks.is_empty() {
+                return Ok(serde_json::json!({"ok": true}));
+            }
+            if chunks.len() > kittypaw_core::telegram::TELEGRAM_MAX_CHUNKS {
                 return Err(KittypawError::Skill(format!(
-                    "Telegram sendMessage error {status}: {err}"
+                    "메시지가 너무 깁니다 ({} 청크, 최대 {})",
+                    chunks.len(),
+                    kittypaw_core::telegram::TELEGRAM_MAX_CHUNKS
                 )));
+            }
+
+            let url = format!("https://api.telegram.org/bot{bot_token}/sendMessage");
+            let mut body = serde_json::json!({"ok": true});
+            for chunk in &chunks {
+                let resp = client
+                    .post(&url)
+                    .json(&serde_json::json!({
+                        "chat_id": chat_id,
+                        "text": chunk,
+                    }))
+                    .send()
+                    .await
+                    .map_err(|e| KittypawError::Skill(format!("Telegram API error: {e}")))?;
+
+                let status = resp.status();
+                body = resp.json().await.map_err(|e| {
+                    KittypawError::Skill(format!("Telegram response parse error: {e}"))
+                })?;
+
+                if !status.is_success() {
+                    let err = body
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown error");
+                    return Err(KittypawError::Skill(format!(
+                        "Telegram sendMessage error {status}: {err}"
+                    )));
+                }
             }
             Ok(body)
         }

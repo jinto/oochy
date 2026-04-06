@@ -276,42 +276,60 @@ impl Channel for TelegramChannel {
     }
 
     async fn send_response(&self, agent_id: &str, response: &str) -> Result<()> {
-        // agent_id is used as the chat_id for Telegram
         let chat_id: i64 = agent_id.parse().map_err(|_| {
             KittypawError::Config(format!("Invalid Telegram chat_id: {}", agent_id))
         })?;
 
-        let url = self.api_url("sendMessage");
-        let body = json!({
-            "chat_id": chat_id,
-            "text": response,
-        });
+        let chunks = kittypaw_core::telegram::split_telegram_text(
+            response,
+            kittypaw_core::telegram::TELEGRAM_MAX_CHARS,
+        );
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| KittypawError::Llm {
-                kind: kittypaw_core::error::LlmErrorKind::Other,
-                message: format!("Telegram sendMessage failed: {}", e),
-            })?;
-
-        let tg_resp: TelegramResponse<serde_json::Value> =
-            resp.json().await.map_err(|e| KittypawError::Llm {
-                kind: kittypaw_core::error::LlmErrorKind::Other,
-                message: format!("Failed to parse sendMessage response: {}", e),
-            })?;
-
-        if !tg_resp.ok {
+        if chunks.len() > kittypaw_core::telegram::TELEGRAM_MAX_CHUNKS {
             return Err(KittypawError::Llm {
                 kind: kittypaw_core::error::LlmErrorKind::Other,
                 message: format!(
-                    "Telegram sendMessage error: {}",
-                    tg_resp.description.unwrap_or_default()
+                    "메시지가 너무 깁니다 ({} 청크, 최대 {})",
+                    chunks.len(),
+                    kittypaw_core::telegram::TELEGRAM_MAX_CHUNKS
                 ),
             });
+        }
+
+        let url = self.api_url("sendMessage");
+
+        for chunk in &chunks {
+            let body = json!({
+                "chat_id": chat_id,
+                "text": chunk,
+            });
+
+            let resp = self
+                .client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| KittypawError::Llm {
+                    kind: kittypaw_core::error::LlmErrorKind::Other,
+                    message: format!("Telegram sendMessage failed: {}", e),
+                })?;
+
+            let tg_resp: TelegramResponse<serde_json::Value> =
+                resp.json().await.map_err(|e| KittypawError::Llm {
+                    kind: kittypaw_core::error::LlmErrorKind::Other,
+                    message: format!("Failed to parse sendMessage response: {}", e),
+                })?;
+
+            if !tg_resp.ok {
+                return Err(KittypawError::Llm {
+                    kind: kittypaw_core::error::LlmErrorKind::Other,
+                    message: format!(
+                        "Telegram sendMessage error: {}",
+                        tg_resp.description.unwrap_or_default()
+                    ),
+                });
+            }
         }
 
         Ok(())
