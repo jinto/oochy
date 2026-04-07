@@ -45,7 +45,7 @@
 
 ### Phase 3: 파일 분할 (LOW risk)
 
-- [ ] **3.1** `schedule.rs` → `schedule/` 디렉토리
+- [x] **3.1** `schedule.rs` → `schedule/` 디렉토리
   - `crates/kittypaw-engine/src/schedule/` 디렉토리 생성
   - `mod.rs` — `run_schedule_loop` + pub re-exports
   - `cron.rs` — `validate_cron`, `is_cron_due`, `is_due`, `is_package_due`
@@ -56,7 +56,7 @@
   - 기존 `schedule.rs` 삭제 (이동 완료 후)
   - **수락 기준:** `cargo test --workspace` 통과, `cargo build` 통과, 공개 API 변경 없음 (lib.rs의 `pub use schedule::*` 유지)
 
-- [ ] **3.2** `agent_loop.rs` → `agent_loop/` 디렉토리
+- [x] **3.2** `agent_loop.rs` → `agent_loop/` 디렉토리
   - `crates/kittypaw-engine/src/agent_loop/` 디렉토리 생성
   - `mod.rs` — `AgentSession`, `AgentLoopParams`, `run_agent_loop`, `run_agent_loop_inner`, `SYSTEM_PROMPT`
   - `commands.rs` — `try_handle_command`, `run_skill_by_name`, `execute_skill_code`, `handle_teach_command`
@@ -64,14 +64,14 @@
   - 기존 `agent_loop.rs` 삭제 (이동 완료 후)
   - **수락 기준:** `cargo test --workspace` 통과, `cargo build` 통과
 
-- [ ] **3.3** `skill_executor/mod.rs` 테스트 분리
+- [x] **3.3** `skill_executor/mod.rs` 테스트 분리
   - 900줄 `#[cfg(test)]` 블록을 `skill_executor/tests.rs` (또는 `skill_executor/tests/` 디렉토리)로 이동
   - `mod.rs`에 `#[cfg(test)] mod tests;` 선언
   - **수락 기준:** `cargo test -p kittypaw-engine` 통과, `mod.rs` 600줄 이하
 
 ### Phase 4: 중복 제거 (MEDIUM risk)
 
-- [ ] **4.1** CredentialResolver 통합
+- [x] **4.1** CredentialResolver 통합
   - `kittypaw-core/src/credential.rs` 신규 파일
   - `resolve_credential(channel: &str, key: &str, env_var: &str, config: &Config) -> Option<String>` 함수
   - `skill_executor/mod.rs::resolve_channel_token()` → credential::resolve_credential 사용
@@ -79,7 +79,7 @@
   - `skill_executor/telegram.rs::resolve_default_chat_id()` → credential::resolve_credential 사용
   - **수락 기준:** `cargo test --workspace` 통과, 3곳의 resolve 로직 일관성 확인
 
-- [ ] **4.2** `AgentLoopParams` 레거시 제거 (선택사항)
+- [x] **4.2** `AgentLoopParams` 레거시 제거 (선택사항)
   - `agent_loop.rs`의 `AgentLoopParams` + `run_agent_loop()` 제거
   - 모든 호출자를 `AgentSession::run()` 으로 이전
   - `kittypaw-cli/src/commands/serve.rs` 등 호출자 확인 후 교체
@@ -87,14 +87,14 @@
 
 ### Phase 5: 정리 (LOW risk)
 
-- [ ] **5.1** Python 레거시 삭제
+- [x] **5.1** Python 레거시 삭제
   - `src/` 디렉토리 삭제 (Python 코드)
   - `tests/unit/` Python 테스트 삭제 (Rust로 이관 완료)
   - `pyproject.toml` / `uv.lock` 삭제
   - **주의:** `infra/` (CDK stacks) 는 별도 검토 — 사용 중이면 유지
   - **수락 기준:** `cargo build --workspace` 통과, `git status` 클린
 
-- [ ] **5.2** 프로덕션 unwrap() 상위 10개 → proper error handling
+- [x] **5.2** 프로덕션 unwrap() 상위 10개 → proper error handling
   - `kittypaw-core/src/secrets.rs` (12개 unwrap) — `?` 또는 `.unwrap_or_else` 로 교체
   - `kittypaw-core/src/package_manager.rs` (48개 unwrap 중 non-test) — 중요도 순 10개
   - **수락 기준:** `cargo test --workspace` 통과, secrets.rs unwrap 0개

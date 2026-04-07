@@ -327,24 +327,38 @@ fn version_increment_in(dir: &Path, safe_name: &str) -> Result<()> {
 
     let toml_path = dir.join(format!("{safe_name}.skill.toml"));
 
-    // Read current version to determine archive version number
-    let toml_content = std::fs::read_to_string(&toml_path)?;
-    let skill: Skill = toml::from_str(&toml_content)
-        .map_err(|e| KittypawError::Skill(format!("Failed to parse skill for archiving: {e}")))?;
-    let version = skill.version;
-
-    let archive_toml = archive_dir.join(format!("{safe_name}.v{version}.skill.toml"));
-    let archive_js = archive_dir.join(format!("{safe_name}.v{version}.js"));
-
-    // Move TOML
-    if toml_path.exists() {
-        std::fs::rename(&toml_path, &archive_toml)?;
-    }
-
-    // Move JS
     let js_path = dir.join(format!("{safe_name}.js"));
-    if js_path.exists() {
-        std::fs::rename(&js_path, &archive_js)?;
+
+    // If TOML is corrupted/unparseable, remove both TOML and JS silently so
+    // the new version can be written cleanly. If it parses correctly, archive
+    // it properly — propagate any rename error rather than silently destroying data.
+    match std::fs::read_to_string(&toml_path)
+        .ok()
+        .and_then(|s| toml::from_str::<Skill>(&s).ok())
+        .map(|s| s.version)
+    {
+        Some(version) => {
+            let archive_toml = archive_dir.join(format!("{safe_name}.v{version}.skill.toml"));
+            let archive_js = archive_dir.join(format!("{safe_name}.v{version}.js"));
+            std::fs::rename(&toml_path, &archive_toml)?;
+            if js_path.exists() {
+                if let Err(e) = std::fs::rename(&js_path, &archive_js) {
+                    // Roll back TOML to keep the skill directory consistent.
+                    let _ = std::fs::rename(&archive_toml, &toml_path);
+                    return Err(KittypawError::Skill(format!(
+                        "Failed to archive JS for '{safe_name}': {e}"
+                    )));
+                }
+            }
+        }
+        None => {
+            tracing::warn!(
+                name = safe_name,
+                "Corrupted skill files removed to allow overwrite"
+            );
+            let _ = std::fs::remove_file(&toml_path);
+            let _ = std::fs::remove_file(&js_path);
+        }
     }
 
     Ok(())

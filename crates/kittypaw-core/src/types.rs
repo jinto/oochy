@@ -98,6 +98,16 @@ pub enum EventType {
     Desktop,
 }
 
+impl EventType {
+    pub fn channel_name(&self) -> &'static str {
+        match self {
+            EventType::Telegram => "telegram",
+            EventType::WebChat => "web",
+            EventType::Desktop => "desktop",
+        }
+    }
+}
+
 /// Phase of an agent execution loop — used for structured observability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

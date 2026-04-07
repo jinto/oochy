@@ -1,5 +1,6 @@
 pub mod capability;
 pub mod config;
+pub mod credential;
 pub mod error;
 pub mod memory;
 pub mod package;

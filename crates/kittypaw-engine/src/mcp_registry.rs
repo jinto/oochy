@@ -54,7 +54,7 @@ impl McpRegistry {
             tracing::info!("MCP server '{name}' connected");
             self.services.insert(name.to_string(), service);
         }
-        Ok(&**self.services.get(name).unwrap())
+        Ok(&**self.services.get(name).expect("just inserted above"))
     }
 
     /// Call a tool on a named MCP server.

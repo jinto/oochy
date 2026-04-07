@@ -20,8 +20,8 @@ pub async fn run_command(
         .map_err(|e| KittypawError::Skill(format!("{label}: failed to spawn: {e}")))?;
 
     // Take stdout/stderr handles before waiting, so we retain child ownership for kill
-    let mut stdout_handle = child.stdout.take().unwrap();
-    let mut stderr_handle = child.stderr.take().unwrap();
+    let mut stdout_handle = child.stdout.take().expect("stdout configured as piped");
+    let mut stderr_handle = child.stderr.take().expect("stderr configured as piped");
 
     let work = async {
         let mut stdout_buf = Vec::new();

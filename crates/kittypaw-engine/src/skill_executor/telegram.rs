@@ -38,23 +38,15 @@ pub(super) fn require_telegram_args(
 }
 
 fn resolve_default_chat_id() -> Result<String> {
-    // Try secrets: telegram/chat_id (onboarding) or channels/telegram_chat_id (settings)
-    kittypaw_core::secrets::get_secret("telegram", "chat_id")
-        .ok()
-        .flatten()
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            kittypaw_core::secrets::get_secret("channels", "telegram_chat_id")
-                .ok()
-                .flatten()
-                .filter(|s| !s.is_empty())
-        })
-        .ok_or_else(|| {
+    let config = kittypaw_core::config::Config::default();
+    kittypaw_core::credential::resolve_credential("telegram", "chat_id", "", &config).ok_or_else(
+        || {
             KittypawError::Config(
                 "Telegram: chat_id가 설정되지 않았습니다. 설정 위자드에서 텔레그램을 연결해주세요."
                     .into(),
             )
-        })
+        },
+    )
 }
 
 /// For media methods (sendVoice, sendDocument, sendPhoto) where LLM-generated code
