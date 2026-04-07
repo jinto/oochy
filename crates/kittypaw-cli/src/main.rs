@@ -90,6 +90,17 @@ enum Commands {
         #[command(subcommand)]
         command: FixesCommands,
     },
+    /// Simulate a telegram/channel event through the full agent pipeline (for debugging)
+    TestEvent {
+        /// Message text to send
+        message: Vec<String>,
+        /// Channel type (telegram, web_chat, desktop)
+        #[arg(long, default_value = "telegram")]
+        channel: String,
+        /// Chat ID (defaults to configured telegram chat_id)
+        #[arg(long)]
+        chat_id: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -312,6 +323,18 @@ async fn main() {
             FixesCommands::Show { fix_id } => commands::fixes::run_fixes_show(fix_id),
             FixesCommands::Approve { fix_id } => commands::fixes::run_fixes_approve(fix_id),
         },
+        Some(Commands::TestEvent {
+            message,
+            channel,
+            chat_id,
+        }) => {
+            let msg = message.join(" ");
+            if msg.trim().is_empty() {
+                eprintln!("Usage: kittypaw test-event \"메시지\"");
+                std::process::exit(1);
+            }
+            commands::chat::run_test_event(&msg, &channel, chat_id.as_deref()).await;
+        }
         None => {
             commands::chat::run_stdin().await;
         }

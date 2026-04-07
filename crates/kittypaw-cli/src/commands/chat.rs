@@ -261,3 +261,77 @@ pub(crate) async fn run_stdin() {
         }
     }
 }
+
+/// Simulate a channel event through the full agent pipeline.
+/// Same path as `serve` — useful for debugging without a real Telegram bot.
+pub(crate) async fn run_test_event(message: &str, channel: &str, chat_id: Option<&str>) {
+    use kittypaw_core::types::{Event, EventType};
+
+    let config = Config::load().unwrap_or_else(|e| {
+        eprintln!("Config error: {e}");
+        std::process::exit(1);
+    });
+
+    let (provider, fallback) = require_provider_with_fallback(&config);
+    let sandbox = kittypaw_sandbox::Sandbox::new_threaded(config.sandbox.clone());
+
+    let db_path = db_path();
+    let store = Arc::new(Mutex::new(Store::open(&db_path).unwrap_or_else(|e| {
+        eprintln!("Database error: {e}");
+        std::process::exit(1);
+    })));
+
+    // Resolve chat_id: arg > secrets > "test-cli"
+    let chat_id = chat_id
+        .map(|s| s.to_string())
+        .or_else(|| {
+            kittypaw_core::secrets::get_secret("telegram", "chat_id")
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| "test-cli".to_string());
+
+    let event_type = match channel {
+        "telegram" => EventType::Telegram,
+        "web_chat" => EventType::WebChat,
+        _ => EventType::Desktop,
+    };
+
+    let event = Event {
+        event_type,
+        payload: serde_json::json!({
+            "text": message,
+            "chat_id": chat_id,
+            "from_name": "test-event",
+        }),
+    };
+
+    eprintln!(">>> test-event: channel={channel}, chat_id={chat_id}");
+    eprintln!(">>> message: {message}");
+    eprintln!();
+
+    let session = kittypaw_engine::agent_loop::AgentSession {
+        provider: &*provider,
+        fallback_provider: fallback.as_deref(),
+        sandbox: &sandbox,
+        store,
+        config: &config,
+        on_token: None,
+        on_permission_request: None,
+    };
+
+    match session.run(event).await {
+        Ok(text) => {
+            if text.is_empty() || text == "null" || text == "(no output)" {
+                eprintln!(">>> (no output — skill calls were executed inline)");
+            } else {
+                println!("{text}");
+            }
+        }
+        Err(e) => {
+            eprintln!(">>> ERROR: {e}");
+            std::process::exit(1);
+        }
+    }
+}
