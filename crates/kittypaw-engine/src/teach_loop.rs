@@ -28,6 +28,11 @@ The `ctx` object contains:
 - Storage.delete(key)
 - Storage.list() — returns {keys: [...]}
 - Llm.generate(prompt) — returns {text: "..."}. Max 3 calls per execution.
+- Web.search(query) — Web search, returns {results: [{title, snippet, url}]}
+- Tts.speak(text) — Text-to-speech, returns {path, size} (MP3 file)
+- Telegram.sendVoice(chatId, filePath) — Send audio file as voice message
+- Memory.save(key, value) — Save to persistent memory
+- Memory.recall(query) — Recall memories
 - console.log(...args)
 
 ## Rules
@@ -275,17 +280,13 @@ fn validate_generated_code(code: &str) -> Result<()> {
 
 fn detect_permissions(code: &str) -> Vec<String> {
     let mut perms = Vec::new();
-    if code.contains("Telegram.") {
-        perms.push("Telegram".into());
-    }
-    if code.contains("Http.") {
-        perms.push("Http".into());
-    }
-    if code.contains("Storage.") {
-        perms.push("Storage".into());
-    }
-    if code.contains("Llm.") {
-        perms.push("Llm".into());
+    for prim in [
+        "Http", "Web", "Telegram", "Slack", "Discord", "Storage", "Llm", "Shell", "Git", "File",
+        "Tts", "Memory", "Todo", "Skill", "Agent", "Moa", "Image", "Vision", "Env",
+    ] {
+        if code.contains(&format!("{prim}.")) {
+            perms.push(prim.to_string());
+        }
     }
     perms
 }

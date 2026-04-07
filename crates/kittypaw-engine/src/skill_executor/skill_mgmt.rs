@@ -57,7 +57,7 @@ pub(super) async fn execute_skill_mgmt(call: &SkillCall) -> Result<serde_json::V
             let mut perms = Vec::new();
             for prim in [
                 "Http", "Web", "Telegram", "Slack", "Discord", "Storage", "Llm", "Shell", "Git",
-                "File",
+                "File", "Tts", "Memory", "Todo", "Skill", "Agent", "Moa", "Image", "Vision", "Env",
             ] {
                 if code.contains(prim) {
                     perms.push(prim.to_string());
