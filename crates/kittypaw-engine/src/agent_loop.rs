@@ -72,6 +72,12 @@ Example — WRONG (hallucination):
   const news = await Llm.generate("write AI news");  // LLM invents fake news!
   return news;
 
+## Voice output
+When the user says "읽어줘", "읽어달라", "음성으로", or "read aloud":
+1. Generate text content first
+2. Call `const tts = await Tts.speak(text)` to create an audio file
+3. Call `await Telegram.sendVoice(tts.path)` to send it as a voice message
+
 ## Clarification
 When a request is ambiguous, ask a clarifying question in natural language BEFORE executing.
 Example: User says "뉴스 보내줘" → return "어떤 분야의 뉴스를 원하시나요? (AI, 경제, 스타트업 등)"
