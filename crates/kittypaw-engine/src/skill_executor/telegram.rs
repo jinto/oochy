@@ -83,7 +83,11 @@ pub(super) async fn execute_telegram(
         "sendMessage" => {
             // ABI: Telegram.sendMessage(chatId, text)
             let (chat_id, text) = require_telegram_args(call, "text")?;
-            kittypaw_core::telegram::send_text_chunked(&client, &bot_token, &chat_id, &text).await
+            kittypaw_core::telegram::send_text_chunked(&client, &bot_token, &chat_id, &text)
+                .await?;
+            // Return null — the message is already delivered, so returning a value
+            // would cause the sandbox output to be re-sent to the user as a second message.
+            Ok(serde_json::Value::Null)
         }
         "sendPhoto" => {
             // ABI: Telegram.sendPhoto(chatId, photoUrl)

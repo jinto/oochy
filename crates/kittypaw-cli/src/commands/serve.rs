@@ -366,7 +366,15 @@ pub(crate) async fn run_serve(bind_addr: &str) {
                 };
                 match session.run(event).await {
                     Ok(text) => {
-                        router.send_response(&event_type, &session_id, &text).await;
+                        // Skip empty/null responses — e.g. when the LLM already sent
+                        // a message via Telegram.sendMessage and there's nothing to echo.
+                        if !text.is_empty()
+                            && text != "null"
+                            && text != "undefined"
+                            && text != "(no output)"
+                        {
+                            router.send_response(&event_type, &session_id, &text).await;
+                        }
                     }
                     Err(e) => {
                         tracing::error!("Agent error for session {session_id}: {e}");
