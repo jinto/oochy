@@ -336,6 +336,19 @@ async fn run_agent_loop_inner(
             });
         }
 
+        // Log full prompt chain at trace level for debugging
+        // Usage: RUST_LOG=kittypaw_engine::agent_loop=trace kittypaw test-event "msg"
+        if tracing::enabled!(tracing::Level::TRACE) {
+            for (i, msg) in messages.iter().enumerate() {
+                tracing::trace!(
+                    "[prompt {i}] role={:?} len={}\n{}",
+                    msg.role,
+                    msg.content.len(),
+                    msg.content
+                );
+            }
+        }
+
         // Call LLM
         let llm_result = if let Some(ref cb) = on_token {
             active_provider
