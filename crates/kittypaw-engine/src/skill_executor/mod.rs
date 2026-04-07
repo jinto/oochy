@@ -465,9 +465,15 @@ async fn execute_single_call(
             }
             kittypaw_core::config::AutonomyLevel::Supervised => {
                 if let Some(cb) = on_permission {
+                    let resource_kind = match call.skill_name.as_str() {
+                        "Telegram" | "Http" | "Web" | "Slack" | "Discord" => {
+                            kittypaw_core::permission::ResourceKind::Network
+                        }
+                        _ => kittypaw_core::permission::ResourceKind::File,
+                    };
                     let request = kittypaw_core::permission::PermissionRequest {
                         request_id: uuid_v4(),
-                        resource_kind: kittypaw_core::permission::ResourceKind::File,
+                        resource_kind,
                         resource_path: format!("{}.{}", call.skill_name, call.method),
                         action: "execute".to_string(),
                         workspace_id: String::new(),

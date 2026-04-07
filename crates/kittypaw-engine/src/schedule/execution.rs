@@ -448,7 +448,7 @@ pub async fn execute_chain_steps(
                         .get(step_idx)
                         .and_then(|s| s.model.as_deref())
                         .or(chain_pkg.model.as_deref());
-                    let _ = crate::skill_executor::execute_skill_calls(
+                    match crate::skill_executor::execute_skill_calls(
                         &chain_result.skill_calls,
                         config,
                         preresolved,
@@ -456,7 +456,26 @@ pub async fn execute_chain_steps(
                         Some(&mut checker),
                         chain_model,
                     )
-                    .await;
+                    .await
+                    {
+                        Ok(call_results) => {
+                            for r in call_results.iter().filter(|r| !r.success) {
+                                tracing::warn!(
+                                    "Chain step '{}': skill call {}.{} failed: {:?}",
+                                    chain_pkg.meta.id,
+                                    r.skill_name,
+                                    r.method,
+                                    r.error
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Chain step '{}': execute_skill_calls error: {e}",
+                                chain_pkg.meta.id
+                            );
+                        }
+                    }
                 }
                 tracing::info!(
                     "Chain step '{}' completed: {}",

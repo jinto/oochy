@@ -19,20 +19,40 @@ The `ctx` object contains:
 - ctx.chat_id: the chat ID (for Telegram responses)
 
 ## Available primitives
-- Telegram.sendMessage(chatId, text)
-- Telegram.sendPhoto(chatId, url)
+- Telegram.sendMessage(text) — Send a message (chat_id auto-resolved)
+- Telegram.sendPhoto(url) — Send a photo
+- Telegram.sendDocument(fileUrl, caption?) — Send a file
+- Telegram.sendVoice(filePath, caption?) — Send audio as voice message
 - Http.get(url) — returns {status, body}
 - Http.post(url, body) — returns {status, body}
+- Http.put(url, body) — returns {status, body}
+- Http.delete(url) — returns {status, body}
+- Web.search(query) — Web search, returns {results: [{title, snippet, url}]}
+- Web.fetch(url) — Fetch a web page, returns text content
 - Storage.get(key) — returns {value} or {value: null}
 - Storage.set(key, value) — returns {ok: true}
 - Storage.delete(key)
 - Storage.list() — returns {keys: [...]}
 - Llm.generate(prompt) — returns {text: "..."}. Max 3 calls per execution.
-- Web.search(query) — Web search, returns {results: [{title, snippet, url}]}
-- Tts.speak(text) — Text-to-speech, returns {path, size} (MP3 file)
-- Telegram.sendVoice(chatId, filePath) — Send audio file as voice message
+- File.read(path) — Read a file
+- File.write(path, content) — Write a file
+- Env.get(key) — Get environment variable
+- Shell.exec(command) — Execute a shell command
+- Git.status() / Git.diff() / Git.log() / Git.commit(message)
+- Tts.speak(text, options?) — Text-to-speech, returns {path, size}
 - Memory.save(key, value) — Save to persistent memory
-- Memory.recall(query) — Recall memories
+- Memory.recall(query) — Recall memories matching a prefix
+- Memory.search(query, limit?) — Full-text search across executions
+- Memory.user(key, value) — Update user profile
+- Todo.add(task) / Todo.done(index) / Todo.list() / Todo.clear()
+- Skill.create(name, description, code, triggerType, triggerValue) — Create a skill
+- Skill.list() / Skill.delete(name)
+- Agent.delegate(task) — Delegate a subtask to a sub-agent
+- Moa.query(prompt) — Mixture of Agents: query all models in parallel
+- Image.generate(prompt) — Generate an image, returns {url}
+- Vision.analyze(imageUrl, prompt?) — Analyze an image, returns {analysis}
+- Slack.sendMessage(text) — Send a Slack message
+- Discord.sendMessage(text) — Send a Discord message
 - console.log(...args)
 
 ## Rules

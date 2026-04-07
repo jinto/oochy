@@ -305,31 +305,43 @@ pub static PRIMITIVES: &[SkillDef] = &[
     },
 ];
 
+/// Budget for user skill section: ~1% of a 32k-token context window.
+/// Built-in primitives are always shown in full; user skills are trimmed when over budget.
+const SKILL_BUDGET_BYTES: usize = 4_000;
+
 /// Build the "## Available Skills" prompt section from the registry + user skills.
+///
+/// Follows Claude Code's budget model: built-in primitives always get full descriptions;
+/// user skills are progressively degraded (full → name+trigger only) when over budget.
 pub fn build_skills_prompt() -> String {
     let mut lines = Vec::new();
     lines.push("## Available Skills".to_string());
 
-    // Built-in primitives
+    // Built-in primitives — always included in full (budget exempt)
     for skill in PRIMITIVES {
         for m in skill.methods {
-            if m.signature.is_empty() {
-                lines.push(format!("- {}.{}() — {}", skill.name, m.name, m.description));
+            let sig = if m.signature.is_empty() {
+                "()".to_string()
             } else {
-                lines.push(format!(
-                    "- {}.{}({}) — {}",
-                    skill.name, m.name, m.signature, m.description
-                ));
-            }
+                format!("({})", m.signature)
+            };
+            lines.push(format!(
+                "- {}.{}{} — {}",
+                skill.name, m.name, sig, m.description
+            ));
         }
     }
 
-    // User-created skills (from disk)
+    // User-created skills (from disk) — budget-managed
     if let Ok(skills) = kittypaw_core::skill::load_all_skills() {
         if !skills.is_empty() {
             lines.push(String::new());
             lines.push("## User Skills".to_string());
-            for (skill, _code) in &skills {
+
+            let primitives_len: usize = lines.iter().map(|l| l.len() + 1).sum();
+            let mut remaining_budget = SKILL_BUDGET_BYTES.saturating_sub(primitives_len);
+
+            for (idx, (skill, _code)) in skills.iter().enumerate() {
                 let trigger = if skill.trigger.trigger_type == "schedule" {
                     format!(
                         " [scheduled: {}]",
@@ -340,10 +352,25 @@ pub fn build_skills_prompt() -> String {
                 } else {
                     String::new()
                 };
-                lines.push(format!(
-                    "- {} — {}{}",
-                    skill.name, skill.description, trigger
-                ));
+
+                // Full entry: "- name — description [trigger]"
+                let full = format!("- {} — {}{}", skill.name, skill.description, trigger);
+                // Compact entry: "- name[trigger]" (no description)
+                let compact = format!("- {}{}", skill.name, trigger);
+
+                let entry = if full.len() + 1 <= remaining_budget {
+                    remaining_budget -= full.len() + 1;
+                    full
+                } else if compact.len() + 1 <= remaining_budget {
+                    remaining_budget -= compact.len() + 1;
+                    compact
+                } else {
+                    // Budget exhausted — report remainder and stop
+                    let omitted = skills.len() - idx;
+                    lines.push(format!("  (+ {omitted} more user skills omitted)"));
+                    break;
+                };
+                lines.push(entry);
             }
         }
     }

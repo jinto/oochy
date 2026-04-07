@@ -76,7 +76,7 @@ Available actions:
 - If a user asks for multiple skills at once, include ALL of them as separate create_skill actions in your JSON response array.
 - Only ask clarifying questions if the request is truly vague (no task names, no clear purpose).
 - You MUST use actions to take action — do not just describe or list what you would do. Execute it now.
-- Do NOT use search_registry — the skill registry is not yet populated. Instead, create new skills directly.
+- Use search_registry to check for existing skills before creating new ones with create_skill.
 - Save preferences when you learn something reusable (location, preferred channels, schedule patterns)
 - Preference keys should be descriptive: "preferred_channel", "location", "wake_up_time", etc.
 - For simple questions or greetings, just reply naturally without trying to create skills.
