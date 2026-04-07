@@ -140,6 +140,18 @@ fn uuid_v4() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
+/// Returns true if the channel skill has a configured token (via config, secrets, or env).
+/// Token presence = the user registered this channel during onboarding = implicit consent.
+fn is_configured_channel(skill_name: &str, config: &kittypaw_core::config::Config) -> bool {
+    let (channel_type, secret_key, env_var) = match skill_name {
+        "Telegram" => ("telegram", "bot_token", "TELEGRAM_BOT_TOKEN"),
+        "Slack" => ("slack", "bot_token", "SLACK_TOKEN"),
+        "Discord" => ("discord", "bot_token", "DISCORD_TOKEN"),
+        _ => return false,
+    };
+    resolve_channel_token(config, channel_type, secret_key, env_var).is_some()
+}
+
 /// Map a skill name to its ResourceKind for Supervised-mode permission dialogs.
 ///
 /// - Network: outbound HTTP/messaging (Telegram, Http, Web, Slack, Discord)
@@ -508,23 +520,35 @@ async fn execute_single_call(
                         }
                     }
                     None => {
-                        // No UI callback in Supervised mode → deny to prevent silent privilege escalation.
-                        // This applies to batch/schedule contexts where no dialog is available.
-                        tracing::warn!(
-                            skill = %call.skill_name,
-                            method = %call.method,
-                            "Supervised mode: no permission UI available, denying write action"
-                        );
-                        return SkillResult {
-                            skill_name: call.skill_name.clone(),
-                            method: call.method.clone(),
-                            success: false,
-                            result: serde_json::Value::Null,
-                            error: Some(format!(
-                                "Blocked by Supervised mode (no permission UI): {}.{}",
-                                call.skill_name, call.method
-                            )),
-                        };
+                        // No UI in batch/schedule context — check by resource kind:
+                        // 1. Configured channels → token registration = onboarding consent → allow
+                        // 2. Http/Web → require onboarding grant (M-5: persist AllowPermanent) → deny
+                        // 3. Execute/File → always deny without UI
+                        let rk = resource_kind_for_skill(call.skill_name.as_str());
+                        let allow = matches!(rk, ResourceKind::Network)
+                            && is_configured_channel(call.skill_name.as_str(), config);
+                        if !allow {
+                            let hint = if matches!(rk, ResourceKind::Network) {
+                                " (웹 접속 허용은 온보딩에서 설정하세요)"
+                            } else {
+                                ""
+                            };
+                            tracing::warn!(
+                                skill = %call.skill_name,
+                                method = %call.method,
+                                "Supervised mode: no permission UI available, denying"
+                            );
+                            return SkillResult {
+                                skill_name: call.skill_name.clone(),
+                                method: call.method.clone(),
+                                success: false,
+                                result: serde_json::Value::Null,
+                                error: Some(format!(
+                                    "Blocked by Supervised mode (no permission UI): {}.{}{}",
+                                    call.skill_name, call.method, hint
+                                )),
+                            };
+                        }
                     }
                 }
             }

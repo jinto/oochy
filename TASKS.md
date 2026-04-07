@@ -53,8 +53,14 @@
   - **TDD**: `shell_requires_execute_permission()` 실패 테스트 먼저
   - `kittypaw-core/src/permission.rs`: `ResourceKind` enum에 `Execute` 추가
   - `skill_executor/mod.rs`: `Shell|Git|Agent|Moa` → `ResourceKind::Execute`
+  - Supervised 배치 경로: 채널(토큰 있음) → 자동 허용, Http/Web → Deny, Execute/File → Deny
   - GUI: "Shell 실행 허용?" 다이얼로그 레이블 추가
-  - **근거:** 현재 Shell/Git은 `File`로 분류되어 사용자가 "파일 접근" 허용 시 Shell 명령도 실행됨
+
+- [ ] **M-5** Http 온보딩 권한 영속화
+  - **TDD**: `http_allowed_after_onboarding_grant()` 실패 테스트 먼저
+  - 온보딩 시 "웹에 접속을 허용하시나요?" → `AllowPermanent` → Store에 저장
+  - `execute_single_call` 배치 경로: Store에서 Http 권한 확인 후 자동 허용
+  - **근거:** 현재 Http.post는 Supervised 배치에서 항상 Deny. 온보딩에서 허락받은 경우 스케줄에서 작동해야 함
 
 ---
 

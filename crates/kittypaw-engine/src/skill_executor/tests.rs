@@ -924,6 +924,63 @@ fn test_network_skills_remain_network() {
     ));
 }
 
+/// Supervised batch: configured channel (token present) → auto-allow without UI.
+/// Token registration during onboarding IS the user's consent for that channel.
+#[tokio::test]
+async fn test_supervised_configured_channel_allowed_in_batch() {
+    let path = temp_db_path();
+    let store = Arc::new(tokio::sync::Mutex::new(open_store(&path)));
+
+    let mut config = kittypaw_core::config::Config::default();
+    config.autonomy_level = kittypaw_core::config::AutonomyLevel::Supervised;
+    config.channels.push(kittypaw_core::config::ChannelConfig {
+        channel_type: kittypaw_core::config::ChannelType::Telegram,
+        token: "dummy-token".to_string(),
+        bind_addr: None,
+    });
+
+    let call = SkillCall {
+        skill_name: "Telegram".to_string(),
+        method: "sendMessage".to_string(),
+        args: vec![json_str("12345"), json_str("hello")],
+    };
+
+    let result = resolve_skill_call(&call, &config, &store, None, None).await;
+    // Must NOT be blocked by permission — may fail with Telegram API error, that's fine
+    assert!(
+        !result.contains("Supervised") && !result.contains("no permission UI"),
+        "Configured Telegram must bypass Supervised batch check, got: {result}"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Supervised batch: Http without onboarding grant → deny with guidance message.
+#[tokio::test]
+async fn test_supervised_http_denied_in_batch_without_grant() {
+    let path = temp_db_path();
+    let store = Arc::new(tokio::sync::Mutex::new(open_store(&path)));
+
+    let mut config = kittypaw_core::config::Config::default();
+    config.autonomy_level = kittypaw_core::config::AutonomyLevel::Supervised;
+
+    // Http.post is a write action → not read-only → triggers permission check
+    let call = SkillCall {
+        skill_name: "Http".to_string(),
+        method: "post".to_string(),
+        args: vec![json_str("https://example.com"), json_str("{}")],
+    };
+
+    let result = resolve_skill_call(&call, &config, &store, None, None).await;
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert!(
+        parsed.get("_error").is_some() || parsed.get("error").is_some(),
+        "Http.post must be denied in Supervised batch without onboarding grant, got: {result}"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
 /// Supervised mode without a permission callback must DENY non-read-only actions.
 /// Previously, missing callback caused silent fall-through to Full-level execution.
 #[tokio::test]
