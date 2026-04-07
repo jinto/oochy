@@ -93,7 +93,10 @@ pub(super) async fn execute_skill_mgmt(call: &SkillCall) -> Result<serde_json::V
                         "name": s.name,
                         "description": s.description,
                         "enabled": s.enabled,
-                        "trigger": s.trigger.trigger_type,
+                        "triggerType": s.trigger.trigger_type,
+                        "triggerValue": s.trigger.cron.as_deref()
+                            .or(s.trigger.keyword.as_deref())
+                            .unwrap_or(""),
                     })
                 })
                 .collect();
