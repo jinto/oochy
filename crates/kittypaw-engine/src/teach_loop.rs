@@ -388,6 +388,13 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_schedule_cron_5field_5min() {
+        // LLM generates "*/5 * * * *" for 5-minute intervals
+        let result = parse_schedule("*/5 * * * *").unwrap();
+        assert_eq!(result, "0 */5 * * * *");
+    }
+
+    #[test]
     fn test_parse_schedule_cron_6field() {
         let result = parse_schedule("0 */10 * * * *").unwrap();
         assert_eq!(result, "0 */10 * * * *");

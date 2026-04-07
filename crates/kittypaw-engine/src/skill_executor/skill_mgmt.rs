@@ -29,14 +29,14 @@ pub(super) async fn execute_skill_mgmt(call: &SkillCall) -> Result<serde_json::V
             let trigger = if trigger_type == "schedule" {
                 if trigger_value.is_empty() {
                     return Err(KittypawError::Sandbox(
-                        "Skill.create: schedule trigger requires a cron expression as the 5th argument (e.g. \"*/10 * * * *\")".into(),
+                        "Skill.create: schedule trigger requires a schedule expression as the 5th argument (e.g. \"every 10m\" or \"*/10 * * * *\")".into(),
                     ));
                 }
-                crate::schedule::validate_cron(trigger_value)
-                    .map_err(|e| KittypawError::Sandbox(format!("Invalid cron: {e}")))?;
+                // parse_schedule handles "every 10m", 5-field cron → 6-field conversion
+                let cron_expr = crate::teach_loop::parse_schedule(trigger_value)?;
                 SkillTrigger {
                     trigger_type: "schedule".into(),
-                    cron: Some(trigger_value.to_string()),
+                    cron: Some(cron_expr),
                     natural: Some(description.to_string()),
                     keyword: None,
                 }
