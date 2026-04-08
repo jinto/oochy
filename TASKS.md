@@ -193,6 +193,24 @@ Plan: `.claude/plans/adaptive-engine.md`
 
 ---
 
+## 테스트 격리 + LLM Eval Framework ← 현재
+
+> 플랜: `.claude/plans/generic-hugging-harbor.md`  
+> 스펙: `.ina/specs/20260409-1800-think-llm-eval-reflection.md`
+
+### Plan A: KITTYPAW_HOME 격리 (전제조건)
+
+- [x] **A-1** `helpers.rs`: `db_path()` 기본값 → `data_dir().join("kittypaw.db")`
+- [x] **A-2** `e2e-reflection.sh`: KITTYPAW_HOME 격리 + trap cleanup
+- [x] **A-3** `e2e-schedule.sh`: KITTYPAW_HOME 격리 + trap cleanup
+
+### Plan B: LLM Eval Framework
+
+- [x] **B-1** `kittypaw-engine/Cargo.toml`: `[features] llm-eval = []` 추가
+- [x] **B-2** `reflection.rs`: `#[cfg(feature = "llm-eval")]` eval 모듈 (골든셋 2개 + behavioral invariant 1개)
+
+---
+
 ## 참고
 
 - [VISION.md](VISION.md) — 철학, 포지셔닝, 마일스톤

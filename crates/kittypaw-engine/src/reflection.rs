@@ -411,4 +411,110 @@ mod tests {
 
         let _ = std::fs::remove_file(&p);
     }
+
+    // ── LLM Eval Tests ────────────────────────────────────────────────────────
+    // Golden set: 이 케이스들은 모델 버전에 무관하게 항상 통과해야 한다.
+    //
+    // ⚠️  업데이트 규칙: 기대값을 바꾸려면 반드시 아래 형식으로 이유를 남길 것.
+    //    // RATIONALE: <왜 이 기대값이 맞는가, 어떤 모델 변화로 인한 변경인지>
+    //
+    // 실행: cargo test -p kittypaw-engine --features llm-eval -- --nocapture
+    // 필요: KITTYPAW_API_KEY 환경변수 (없으면 즉시 panic)
+    #[cfg(feature = "llm-eval")]
+    mod eval {
+        use super::*;
+        use kittypaw_core::config::ModelConfig;
+        use kittypaw_llm::registry::LlmRegistry;
+        use std::sync::Arc;
+
+        fn eval_provider() -> Arc<dyn LlmProvider> {
+            let api_key = std::env::var("KITTYPAW_API_KEY")
+                .expect("KITTYPAW_API_KEY must be set for llm-eval tests");
+            let registry = LlmRegistry::from_configs(&[ModelConfig {
+                name: "claude".into(),
+                provider: "claude".into(),
+                model: "claude-haiku-4-5-20251001".into(), // 비용 최소화
+                api_key,
+                max_tokens: 1024,
+                default: true,
+                base_url: None,
+                context_window: None,
+            }]);
+            registry.default_provider().expect("provider required")
+        }
+
+        /// (store, db_path, config_with_threshold)
+        fn eval_setup(
+            msgs: &[&str],
+            threshold: u32,
+        ) -> (Store, std::path::PathBuf, ReflectionConfig) {
+            let (store, p) = temp_store();
+            insert_user_messages(&store, msgs);
+            let mut config = test_config();
+            config.intent_threshold = threshold;
+            (store, p, config)
+        }
+
+        // RATIONALE: 환율/달러/환율은 동일 도메인 인텐트.
+        //   어떤 언어 모델도 이를 서로 다른 그룹으로 분류하면 regression.
+        #[tokio::test]
+        async fn golden_set_currency_grouped() {
+            let provider = eval_provider();
+            let (store, p, config) = eval_setup(
+                &["환율 알려줘", "달러 가격 얼마야", "오늘 환율이 얼마야"],
+                2, // LLM 파싱 변동성 허용
+            );
+            let result = run_reflection(&store, provider.as_ref(), &config)
+                .await
+                .unwrap();
+            let _ = std::fs::remove_file(&p);
+            assert!(
+                !result.suggestions.is_empty(),
+                "환율 관련 3개 쿼리에서 suggestion이 없음. \
+                 LLM 비결정성 문제일 수 있음 — 재실행으로 확인."
+            );
+        }
+
+        // RATIONALE: 날씨 3종 표현은 동일 인텐트 (지역 미지정).
+        //   "날씨 알려줘", "오늘 날씨", "날씨 어때"는 모두 일반 날씨 조회.
+        #[tokio::test]
+        async fn golden_set_weather_grouped() {
+            let provider = eval_provider();
+            let (store, p, config) = eval_setup(&["날씨 알려줘", "오늘 날씨", "날씨 어때"], 2);
+            let result = run_reflection(&store, provider.as_ref(), &config)
+                .await
+                .unwrap();
+            let _ = std::fs::remove_file(&p);
+            assert!(
+                !result.suggestions.is_empty(),
+                "날씨 관련 3개 쿼리에서 suggestion이 없음."
+            );
+        }
+
+        // behavioral invariant: 동일 도메인 5개 유사 메시지 → suggestion 1개 이상
+        // LLM 비결정성을 고려한 느슨한 하한선 (N=5, M≥1)
+        #[tokio::test]
+        async fn behavioral_invariant_grouping_ratio() {
+            let provider = eval_provider();
+            let (store, p, config) = eval_setup(
+                &[
+                    "뉴스 알려줘",
+                    "오늘 뉴스 뭐야",
+                    "최신 뉴스 보여줘",
+                    "뉴스 요약해줘",
+                    "오늘 주요 뉴스",
+                ],
+                3,
+            );
+            let result = run_reflection(&store, provider.as_ref(), &config)
+                .await
+                .unwrap();
+            let _ = std::fs::remove_file(&p);
+            assert!(
+                !result.suggestions.is_empty(),
+                "뉴스 관련 5개 유사 쿼리에서 suggestion이 없음 (behavioral invariant 위반). \
+                 LLM이 그룹핑을 전혀 생성하지 않은 경우 프롬프트 점검 필요."
+            );
+        }
+    }
 }

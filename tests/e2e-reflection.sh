@@ -1,17 +1,30 @@
 #!/bin/bash
 # E2E test: Reflection loop — repeated messages → skill suggestion
-# Requires: real LLM API key configured, kittypaw binary built
+# Requires: KITTYPAW_API_KEY set, kittypaw binary built
 # Usage: ./tests/e2e-reflection.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BINARY="./target/debug/kittypaw"
 
-echo "=== E2E: Reflection Loop ==="
+# 격리된 임시 환경 — 실제 ~/.kittypaw 데이터 보호
+export KITTYPAW_HOME
+KITTYPAW_HOME=$(mktemp -d)
+unset KITTYPAW_DB_PATH  # KITTYPAW_HOME 격리가 우선되도록
+trap 'rm -rf "$KITTYPAW_HOME"' EXIT
 
-# Step 0: Cleanup
-echo ">>> Step 0: Cleanup"
-$BINARY reflection clear 2>/dev/null || true
+# 최소 설정 파일 (api_key는 KITTYPAW_API_KEY 환경변수로 주입됨)
+cat > "$KITTYPAW_HOME/kittypaw.toml" <<TOML
+[llm]
+provider = "claude"
+api_key = ""
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+TOML
+
+echo "=== E2E: Reflection Loop (isolated: $KITTYPAW_HOME) ==="
 
 # Step 1: Send 3 similar messages
 echo ""
@@ -57,7 +70,6 @@ fi
 # Step 5: Test reject flow (send more messages, re-run, then reject)
 echo ""
 echo ">>> Step 5: Test reject flow"
-$BINARY reflection clear 2>/dev/null || true
 for MSG in "날씨 알려줘" "오늘 날씨" "날씨 어때"; do
     $BINARY test-event "$MSG" --chat-id e2e-reflection >/dev/null 2>&1 || true
 done
@@ -74,11 +86,6 @@ if [ -n "$HASH" ]; then
 else
     echo "  SKIP: No candidates to reject"
 fi
-
-# Cleanup
-echo ""
-echo ">>> Cleanup"
-$BINARY reflection clear 2>/dev/null || true
 
 echo ""
 echo "=== E2E: Reflection Loop DONE ==="

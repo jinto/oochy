@@ -32,3 +32,9 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 async-trait = "0.1"
 tempfile = "3"
+
+[features]
+# 실제 LLM API를 호출하는 골든셋/behavioral 테스트. 기본 cargo test에서 제외됨.
+# 실행: cargo test -p kittypaw-engine --features llm-eval
+# 필요: KITTYPAW_API_KEY 환경변수
+llm-eval = []

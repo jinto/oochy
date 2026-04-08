@@ -1,20 +1,33 @@
 #!/bin/bash
 # E2E test: Skill create → schedule registration → list
-# Requires: real LLM API key configured, kittypaw binary built
+# Requires: KITTYPAW_API_KEY set, kittypaw binary built
 # Usage: ./tests/e2e-schedule.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BINARY="./target/debug/kittypaw"
-SKILLS_DIR=".kittypaw/skills"
-DB="kittypaw.db"
 
-echo "=== E2E: Schedule Skill Lifecycle ==="
+# 격리된 임시 환경 — 실제 ~/.kittypaw 데이터 보호
+export KITTYPAW_HOME
+KITTYPAW_HOME=$(mktemp -d)
+SKILLS_DIR="$KITTYPAW_HOME/skills"
+DB="$KITTYPAW_HOME/kittypaw.db"
+unset KITTYPAW_DB_PATH  # KITTYPAW_HOME 격리가 우선되도록
+trap 'rm -rf "$KITTYPAW_HOME"' EXIT
 
-# Cleanup
-rm -f "$SKILLS_DIR"/*.toml "$SKILLS_DIR"/*.js 2>/dev/null || true
-sqlite3 "$DB" "DELETE FROM skill_schedule;" 2>/dev/null || true
-sqlite3 "$DB" "DELETE FROM conversations WHERE agent_id LIKE '%e2e%';" 2>/dev/null || true
+cat > "$KITTYPAW_HOME/kittypaw.toml" <<TOML
+[llm]
+provider = "claude"
+api_key = ""
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+TOML
+
+mkdir -p "$SKILLS_DIR"
+
+echo "=== E2E: Schedule Skill Lifecycle (isolated: $KITTYPAW_HOME) ==="
 
 # Step 1: Create a scheduled skill
 echo ""
@@ -69,10 +82,6 @@ else
     echo "FAIL: Skill not found in list"
     exit 1
 fi
-
-# Cleanup
-rm -f "$SKILLS_DIR"/*.toml "$SKILLS_DIR"/*.js 2>/dev/null || true
-sqlite3 "$DB" "DELETE FROM skill_schedule;" 2>/dev/null || true
 
 echo ""
 echo "=== ALL E2E TESTS PASSED ==="

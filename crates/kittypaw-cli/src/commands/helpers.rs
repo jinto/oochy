@@ -4,7 +4,17 @@ use kittypaw_llm::registry::LlmRegistry;
 use std::sync::Arc;
 
 pub(crate) fn db_path() -> String {
-    std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| "kittypaw.db".into())
+    // Override: KITTYPAW_DB_PATH > KITTYPAW_HOME/kittypaw.db > "kittypaw.db"
+    //
+    // Migration note: prior to this change the default was `./kittypaw.db` (CWD-relative).
+    // If you have existing data there, move it:
+    //   mv ./kittypaw.db ~/.kittypaw/kittypaw.db
+    // Or set KITTYPAW_DB_PATH to the old path to keep using it.
+    std::env::var("KITTYPAW_DB_PATH").unwrap_or_else(|_| {
+        kittypaw_core::secrets::data_dir()
+            .map(|d| d.join("kittypaw.db").to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "kittypaw.db".into())
+    })
 }
 
 /// Build an LlmRegistry from config.
@@ -59,4 +69,40 @@ pub(crate) fn require_provider_with_fallback(
 /// Build a registry and return the default provider, or exit with an error message.
 pub(crate) fn require_provider(config: &Config) -> Arc<dyn LlmProvider> {
     require_provider_with_fallback(config).0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // env vars are process-wide — serialize to avoid parallel test races
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn db_path_explicit_env_overrides_all() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("KITTYPAW_HOME");
+        std::env::set_var("KITTYPAW_DB_PATH", "/tmp/explicit.db");
+        let path = db_path();
+        std::env::remove_var("KITTYPAW_DB_PATH");
+        assert_eq!(path, "/tmp/explicit.db");
+    }
+
+    #[test]
+    fn db_path_uses_kittypaw_home_when_set() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("KITTYPAW_DB_PATH");
+        std::env::set_var("KITTYPAW_HOME", "/tmp/test-kittypaw-home");
+        let path = db_path();
+        std::env::remove_var("KITTYPAW_HOME");
+        assert!(
+            path.contains("/tmp/test-kittypaw-home"),
+            "Expected path under KITTYPAW_HOME, got: {path}"
+        );
+        assert!(
+            path.ends_with("kittypaw.db"),
+            "Expected kittypaw.db suffix, got: {path}"
+        );
+    }
 }
