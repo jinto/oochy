@@ -270,39 +270,108 @@ pub(super) fn strip_html_tags(html: &str) -> String {
 
 // ── Multi-backend web search dispatch ────────────────────────────────────
 
-/// Auto-select search backend based on available API keys.
-/// Priority: Brave → Tavily → Exa → DuckDuckGo Instant Answer (fallback).
+/// Search backend dispatch with fallback chain.
+///
+/// 1. If `search/backend` is explicitly set → use that backend
+/// 2. If no backend set but API keys exist → legacy auto-detect (Brave>Tavily>Exa)
+/// 3. Fallback: DuckDuckGo HTML Search (no key required)
+///
+/// If the configured/detected backend fails, automatically falls back to DDG.
 async fn web_search_dispatch(query: &str, max_results: usize) -> Result<Vec<serde_json::Value>> {
     use kittypaw_core::secrets::get_secret;
 
+    let max_results = max_results.min(20); // Cap to prevent abuse
+
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none()) // SSRF defense
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    // 1. Brave Search (free 2000 queries/month)
-    if let Ok(Some(key)) = get_secret("search", "brave_api_key") {
-        if !key.is_empty() {
-            return brave_search(&client, &key, query, max_results).await;
+    // Determine which backend to try first
+    let backend = get_secret("search", "backend")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    let primary_result = match backend.as_str() {
+        // Explicit backend selection
+        "brave" | "tavily" | "exa" => try_backend(&client, &backend, query, max_results).await,
+        "ddg" => return ddg_html_search(&client, query, max_results).await,
+
+        // No explicit backend → legacy auto-detect by API key presence
+        _ => {
+            let backends = ["brave", "tavily", "exa"];
+            let mut result = None;
+            for name in backends {
+                if let Some(r) = try_backend(&client, name, query, max_results).await {
+                    result = Some(r);
+                    break;
+                }
+            }
+            result
         }
+    };
+
+    // If primary backend succeeded, return its results
+    if let Some(Ok(results)) = primary_result {
+        return Ok(results);
     }
 
-    // 2. Tavily (free 1000 queries/month)
-    if let Ok(Some(key)) = get_secret("search", "tavily_api_key") {
-        if !key.is_empty() {
-            return tavily_search(&client, &key, query, max_results).await;
-        }
+    // Log fallback if a primary backend was attempted but failed
+    if let Some(Err(ref e)) = primary_result {
+        tracing::warn!("Search backend failed, falling back to DuckDuckGo: {e}");
     }
 
-    // 3. Exa (AI-native search)
-    if let Ok(Some(key)) = get_secret("search", "exa_api_key") {
-        if !key.is_empty() {
-            return exa_search(&client, &key, query, max_results).await;
-        }
+    // Fallback: DuckDuckGo HTML Search (always available, no key required)
+    ddg_html_search(&client, query, max_results)
+        .await
+        .map_err(|ddg_err| {
+            let primary_msg = primary_result
+                .as_ref()
+                .and_then(|r| r.as_ref().err())
+                .map(|e| format!("Primary: {e}. "))
+                .unwrap_or_default();
+            KittypawError::Skill(format!(
+                "All search backends failed. {primary_msg}DuckDuckGo: {ddg_err}"
+            ))
+        })
+}
+
+/// Map backend name to its secret key name.
+fn search_key_name(backend: &str) -> Option<&'static str> {
+    match backend {
+        "brave" => Some("brave_api_key"),
+        "tavily" => Some("tavily_api_key"),
+        "exa" => Some("exa_api_key"),
+        _ => None,
+    }
+}
+
+/// Try a named search backend, returning None if the API key is missing.
+async fn try_backend(
+    client: &reqwest::Client,
+    name: &str,
+    query: &str,
+    max_results: usize,
+) -> Option<Result<Vec<serde_json::Value>>> {
+    use kittypaw_core::secrets::get_secret;
+
+    let key_name = search_key_name(name)?;
+    let key = get_secret("search", key_name)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if key.is_empty() {
+        return None; // No key → skip silently, let fallback handle it
     }
 
-    // 4. Fallback: DuckDuckGo Instant Answer API (free, no key, but limited)
-    ddg_instant_answer(&client, query, max_results).await
+    Some(match name {
+        "brave" => brave_search(client, &key, query, max_results).await,
+        "tavily" => tavily_search(client, &key, query, max_results).await,
+        "exa" => exa_search(client, &key, query, max_results).await,
+        _ => unreachable!(),
+    })
 }
 
 async fn brave_search(
@@ -428,50 +497,215 @@ async fn exa_search(
     Ok(results)
 }
 
-async fn ddg_instant_answer(
+/// Parse DuckDuckGo HTML search results into structured data.
+///
+/// Pure function — no network I/O, fully testable with HTML fixtures.
+/// Extracts `<a class="result__a">` (title + URL) and `<a class="result__snippet">` (snippet).
+fn parse_ddg_html(html: &str, max_results: usize) -> Vec<serde_json::Value> {
+    use std::sync::LazyLock;
+
+    // Match <a ... class="result__a" ... href="URL" ...>Title</a>
+    // Handles both attribute orders: class before href, or href before class.
+    static TITLE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)</a>"#)
+            .unwrap()
+    });
+    // Also match the reverse order: href before class
+    static TITLE_RE_ALT: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"<a[^>]*href="([^"]*)"[^>]*class="result__a"[^>]*>([\s\S]*?)</a>"#)
+            .unwrap()
+    });
+    static SNIPPET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)</a>"#).unwrap()
+    });
+
+    let titles: Vec<(&str, &str)> = TITLE_RE
+        .captures_iter(html)
+        .chain(TITLE_RE_ALT.captures_iter(html))
+        .map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str()))
+        .collect();
+
+    let snippets: Vec<&str> = SNIPPET_RE
+        .captures_iter(html)
+        .map(|c| c.get(1).unwrap().as_str())
+        .collect();
+
+    titles
+        .into_iter()
+        .zip(snippets.into_iter().chain(std::iter::repeat_with(|| "")))
+        .take(max_results)
+        .map(|((url, title), snippet)| {
+            // Handle potential DDG redirect URLs (//duckduckgo.com/l/?uddg=ENCODED_URL)
+            let resolved_url = resolve_ddg_url(url);
+            serde_json::json!({
+                "title": strip_html_inline(title),
+                "snippet": strip_html_inline(snippet),
+                "url": resolved_url,
+            })
+        })
+        .collect()
+}
+
+/// Resolve DuckDuckGo redirect URLs to the actual target URL.
+/// Direct URLs pass through unchanged.
+fn resolve_ddg_url(url: &str) -> String {
+    if url.contains("duckduckgo.com/l/?") {
+        // Extract the `uddg` parameter (the actual URL, percent-encoded)
+        if let Some(pos) = url.find("uddg=") {
+            let encoded = &url[pos + 5..];
+            let end = encoded.find('&').unwrap_or(encoded.len());
+            return urlencoding::decode(&encoded[..end])
+                .unwrap_or_else(|_| encoded[..end].into())
+                .into_owned();
+        }
+    }
+    url.to_string()
+}
+
+/// Strip inline HTML tags (e.g. `<b>`, `</b>`) and decode common entities.
+fn strip_html_inline(s: &str) -> String {
+    use std::sync::LazyLock;
+    static TAG_RE: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"<[^>]+>").unwrap());
+
+    let no_tags = TAG_RE.replace_all(s, "");
+    no_tags
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+}
+
+async fn ddg_html_search(
     client: &reqwest::Client,
     query: &str,
     max_results: usize,
 ) -> Result<Vec<serde_json::Value>> {
-    let url = format!(
-        "https://api.duckduckgo.com/?q={}&format=json&no_html=1&skip_disambig=1",
-        urlencoding::encode(query)
-    );
     let resp = client
-        .get(&url)
-        .header("User-Agent", "KittyPaw/0.1")
+        .post("https://html.duckduckgo.com/html/")
+        .header("User-Agent", "Mozilla/5.0 (compatible; KittyPaw/0.1)")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!("q={}&b=&kl=", urlencoding::encode(query)))
         .send()
         .await
-        .map_err(|e| KittypawError::Skill(format!("DDG search error: {e}")))?;
+        .map_err(|e| KittypawError::Skill(format!("DDG HTML search error: {e}")))?;
 
-    let body: serde_json::Value = resp
-        .json()
+    let html = resp
+        .text()
         .await
-        .map_err(|e| KittypawError::Skill(format!("DDG parse error: {e}")))?;
+        .map_err(|e| KittypawError::Skill(format!("DDG HTML read error: {e}")))?;
 
-    let mut results = Vec::new();
-
-    if let Some(text) = body["AbstractText"].as_str() {
-        if !text.is_empty() {
-            results.push(serde_json::json!({
-                "title": body["Heading"].as_str().unwrap_or(""),
-                "snippet": text,
-                "url": body["AbstractURL"].as_str().unwrap_or(""),
-            }));
-        }
+    let results = parse_ddg_html(&html, max_results);
+    if results.is_empty() {
+        return Err(KittypawError::Skill(
+            "DDG HTML search: no results parsed (HTML structure may have changed)".into(),
+        ));
     }
-
-    if let Some(topics) = body["RelatedTopics"].as_array() {
-        for topic in topics.iter().take(max_results) {
-            if let Some(text) = topic["Text"].as_str() {
-                results.push(serde_json::json!({
-                    "title": text.split(" - ").next().unwrap_or(text),
-                    "snippet": text,
-                    "url": topic["FirstURL"].as_str().unwrap_or(""),
-                }));
-            }
-        }
-    }
-
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DDG_HTML_FIXTURE: &str = r#"
+        <div class="result results_links results_links_deep web-result ">
+          <div class="links_main links_deep result__body">
+            <h2 class="result__title">
+              <a rel="nofollow" class="result__a" href="https://rust-lang.org/">Rust Programming Language</a>
+            </h2>
+            <a class="result__snippet" href="https://rust-lang.org/">A language empowering everyone to build reliable and efficient software.</a>
+          </div>
+        </div>
+        <div class="result results_links results_links_deep web-result ">
+          <div class="links_main links_deep result__body">
+            <h2 class="result__title">
+              <a rel="nofollow" class="result__a" href="https://en.wikipedia.org/wiki/Rust_(programming_language)">Rust (programming language) - Wikipedia</a>
+            </h2>
+            <a class="result__snippet" href="https://en.wikipedia.org/wiki/Rust_(programming_language)"><b>Rust</b> is a general-purpose <b>programming</b> language noted for its emphasis on performance.</a>
+          </div>
+        </div>
+        <div class="result results_links results_links_deep web-result ">
+          <div class="links_main links_deep result__body">
+            <h2 class="result__title">
+              <a rel="nofollow" class="result__a" href="https://doc.rust-lang.org/book/">The Rust Programming Language - Rust</a>
+            </h2>
+            <a class="result__snippet" href="https://doc.rust-lang.org/book/">The official <b>Rust</b> book &#x27;The <b>Rust</b> <b>Programming</b> Language&#x27; by Steve Klabnik &amp; Carol Nichols.</a>
+          </div>
+        </div>
+    "#;
+
+    #[test]
+    fn parse_ddg_html_extracts_results() {
+        let results = parse_ddg_html(DDG_HTML_FIXTURE, 10);
+        assert_eq!(results.len(), 3);
+
+        assert_eq!(results[0]["title"], "Rust Programming Language");
+        assert_eq!(results[0]["url"], "https://rust-lang.org/");
+        assert!(results[0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("empowering everyone"));
+
+        assert_eq!(
+            results[1]["url"],
+            "https://en.wikipedia.org/wiki/Rust_(programming_language)"
+        );
+    }
+
+    #[test]
+    fn parse_ddg_html_strips_bold_tags() {
+        let results = parse_ddg_html(DDG_HTML_FIXTURE, 10);
+        let snippet = results[1]["snippet"].as_str().unwrap();
+        assert!(!snippet.contains("<b>"));
+        assert!(snippet.contains("Rust is a general-purpose"));
+    }
+
+    #[test]
+    fn parse_ddg_html_decodes_entities() {
+        let results = parse_ddg_html(DDG_HTML_FIXTURE, 10);
+        let snippet = results[2]["snippet"].as_str().unwrap();
+        assert!(snippet.contains("'The Rust Programming Language'"));
+        assert!(snippet.contains("Steve Klabnik & Carol Nichols"));
+    }
+
+    #[test]
+    fn parse_ddg_html_respects_max_results() {
+        let results = parse_ddg_html(DDG_HTML_FIXTURE, 2);
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn parse_ddg_html_empty_html() {
+        let results = parse_ddg_html("<html><body>no results</body></html>", 5);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn resolve_ddg_url_direct() {
+        assert_eq!(
+            resolve_ddg_url("https://rust-lang.org/"),
+            "https://rust-lang.org/"
+        );
+    }
+
+    #[test]
+    fn resolve_ddg_url_redirect() {
+        let redirect = "//duckduckgo.com/l/?uddg=https%3A%2F%2Frust-lang.org%2F&rut=abc";
+        assert_eq!(resolve_ddg_url(redirect), "https://rust-lang.org/");
+    }
+
+    #[test]
+    fn parse_ddg_html_reversed_attr_order() {
+        let html = r#"
+            <a href="https://example.com/" class="result__a">Example</a>
+            <a class="result__snippet">A snippet.</a>
+        "#;
+        let results = parse_ddg_html(html, 5);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["url"], "https://example.com/");
+        assert_eq!(results[0]["title"], "Example");
+    }
 }

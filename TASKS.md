@@ -131,7 +131,16 @@
 - [ ] teach loop 키워드 분류기 (automation→경량, analysis→중간)
 - [ ] 대화 중 자동 모델 교체
 - [ ] 자연어 자동화 조합 (기존 스킬 커스터마이즈)
-- [ ] 웹 검색 프로바이더 폴백 체인 (Exa → DuckDuckGo)
+
+### Web.search 무설정 기본값 + 폴백 체인 ✅
+> 플랜: .claude/plans/web-search-fallback-chain.md | 리서치: docs/20260409-1500-research-agent-web-search.md
+- [x] Task 1: `parse_ddg_html()` 순수 함수 + 단위 테스트 (http.rs) — DDG HTML fixture로 title/snippet/url 파싱 검증
+- [x] Task 2: `ddg_html_search()` 구현 (http.rs) — `html.duckduckgo.com/html/` POST + parse_ddg_html 호출, 기존 `ddg_instant_answer()` 교체
+- [x] Task 3: `web_search_dispatch()` 폴백 체인 리팩터 (http.rs) — 설정 기반 디스패치 + DDG 폴백 + 에러 구분 ("결과 없음" vs "백엔드 전부 실패")
+- [x] Task 4: Settings UI 검색 백엔드 섹션 (settings.rs + i18n.rs) — 드롭다운(DDG/Brave/Tavily/Exa) + 조건부 API 키 입력
+- [x] Task 5: 통합 테스트 + 하위 호환 검증 — 기존 API 키 설정 사용자 동작 유지 확인
+
+### 기타 백로그
 - [ ] 스킬 체이닝 병렬 실행 (`parallel()`)
 - [ ] AI 비서 프리셋 (캐릭터 + 말투 + 배경지식)
 - [ ] /daily 모닝 브리핑 (Todoist + Calendar)

@@ -148,6 +148,16 @@ impl I18n {
         );
         strings.insert("settings.bot_token", ["봇 토큰", "Bot Token"]);
         strings.insert("settings.chat_id", ["채팅 ID", "Chat ID"]);
+        strings.insert("settings.search", ["웹 검색", "Web Search"]);
+        strings.insert("settings.search_backend", ["검색 백엔드", "Search Backend"]);
+        strings.insert("settings.search_api_key", ["검색 API 키", "Search API Key"]);
+        strings.insert(
+            "settings.search_desc",
+            [
+                "기본값(DuckDuckGo)은 API 키 없이 작동합니다. 더 나은 품질이 필요하면 유료 API를 설정하세요.",
+                "Default (DuckDuckGo) works without an API key. Set a paid API for better quality.",
+            ],
+        );
         strings.insert("settings.slack", ["채널 연결 (Slack)", "Channel (Slack)"]);
         strings.insert(
             "settings.discord",
