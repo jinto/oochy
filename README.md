@@ -243,7 +243,7 @@ cargo fmt                 # 포맷
 | `kittypaw-store` | SQLite 저장소 (대화, 스킬 스토리지, 워크스페이스) |
 | `kittypaw-engine` | 런타임 엔진 (agent loop, 스킬 실행기, 스케줄러, teach loop) |
 | `kittypaw-workspace` | 파일 관리, 검색, 권한 체커 |
-| `kittypaw-channels` | 텔레그램/슬랙/디스코드 채널 어댑터 |
+| `kittypaw-channels` | 텔레그램/슬랙/디스코드/카카오톡 채널 어댑터 |
 | `kittypaw-cli` | CLI 바이너리, 서버 (serve.rs), REST API, 원격 클라이언트 |
 | `kittypaw-gui` | Dioxus 데스크톱 GUI |
 

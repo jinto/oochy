@@ -93,6 +93,12 @@ impl Event {
                 .and_then(|v| v.as_str())
                 .unwrap_or("default")
                 .to_string(),
+            EventType::KakaoTalk => self
+                .payload
+                .get("user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string(),
         }
     }
 }
@@ -103,6 +109,7 @@ pub enum EventType {
     WebChat,
     Telegram,
     Desktop,
+    KakaoTalk,
 }
 
 impl EventType {
@@ -111,6 +118,7 @@ impl EventType {
             EventType::Telegram => "telegram",
             EventType::WebChat => "web",
             EventType::Desktop => "desktop",
+            EventType::KakaoTalk => "kakao",
         }
     }
 }
@@ -188,4 +196,37 @@ pub struct ExecutionResult {
     pub skill_calls: Vec<SkillCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn kakao_event_session_id() {
+        let event = Event {
+            event_type: EventType::KakaoTalk,
+            payload: json!({
+                "user_id": "user_abc",
+                "text": "hi",
+                "callback_url": "https://callback.kakao.com/123"
+            }),
+        };
+        assert_eq!(event.session_id(), "user_abc");
+    }
+
+    #[test]
+    fn kakao_channel_name() {
+        assert_eq!(EventType::KakaoTalk.channel_name(), "kakao");
+    }
+
+    #[test]
+    fn kakao_session_id_falls_back_to_default() {
+        let event = Event {
+            event_type: EventType::KakaoTalk,
+            payload: json!({}),
+        };
+        assert_eq!(event.session_id(), "default");
+    }
 }

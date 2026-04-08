@@ -1,0 +1,11 @@
+name = "kittypaw-relay"
+main = "src/index.ts"
+compatibility_date = "2024-04-01"
+
+[[kv_namespaces]]
+binding = "MESSAGES"
+id = "placeholder_replace_before_deploy"
+preview_id = "placeholder_replace_before_deploy"
+
+[vars]
+# KAKAO_SECRET is set via `wrangler secret put KAKAO_SECRET`

@@ -79,6 +79,7 @@ fn telegram_config() -> kittypaw_core::config::Config {
         channel_type: kittypaw_core::config::ChannelType::Telegram,
         token: "dummy-token".to_string(),
         bind_addr: None,
+        kakao: None,
     });
     config
 }
@@ -937,6 +938,7 @@ async fn test_supervised_configured_channel_allowed_in_batch() {
         channel_type: kittypaw_core::config::ChannelType::Telegram,
         token: "dummy-token".to_string(),
         bind_addr: None,
+        kakao: None,
     });
 
     let call = SkillCall {

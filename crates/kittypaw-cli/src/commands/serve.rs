@@ -135,6 +135,8 @@ refresh(); setInterval(refresh, 30000);
 struct ResponseRouter<'a> {
     ws_channel: &'a ServeWebSocketChannel,
     config: &'a kittypaw_core::config::Config,
+    /// KakaoTalk: callback_url extracted from the event payload before it was moved.
+    kakao_callback_url: Option<String>,
 }
 
 impl<'a> ResponseRouter<'a> {
@@ -151,6 +153,13 @@ impl<'a> ResponseRouter<'a> {
             EventType::Desktop => {
                 tracing::info!("Desktop response for {session_id}: {text}");
             }
+            EventType::KakaoTalk => {
+                if let Some(callback_url) = &self.kakao_callback_url {
+                    send_kakao_callback(callback_url, text).await;
+                } else {
+                    tracing::warn!("KakaoTalk response: no callback_url for session {session_id}");
+                }
+            }
         }
     }
 
@@ -164,6 +173,15 @@ impl<'a> ResponseRouter<'a> {
             }
             EventType::Desktop => {
                 tracing::error!("Desktop error for {session_id}: {text}");
+            }
+            EventType::KakaoTalk => {
+                if let Some(callback_url) = &self.kakao_callback_url {
+                    send_kakao_callback(callback_url, &format!("오류: {text}")).await;
+                } else {
+                    tracing::error!(
+                        "KakaoTalk error, no callback_url for session {session_id}: {text}"
+                    );
+                }
             }
         }
     }
@@ -329,7 +347,12 @@ pub(crate) async fn run_serve(bind_addr: &str) {
 
                 let session_id = event.session_id();
                 let event_type = event.event_type.clone();
-                let router = ResponseRouter { ws_channel: &ws_channel, config: &config };
+                let kakao_callback_url = if event.event_type == EventType::KakaoTalk {
+                    event.payload.get("callback_url").and_then(|v| v.as_str()).map(|s| s.to_string())
+                } else {
+                    None
+                };
+                let router = ResponseRouter { ws_channel: &ws_channel, config: &config, kakao_callback_url };
 
                 // ── Security gate: reject unpaired Telegram chat IDs ────
                 if event.event_type == EventType::Telegram
@@ -424,5 +447,22 @@ pub(crate) async fn send_telegram_message(
         .await;
     if let Err(e) = res {
         tracing::warn!("Failed to send Telegram message: {e}");
+    }
+}
+
+async fn send_kakao_callback(callback_url: &str, text: &str) {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(callback_url)
+        .json(&serde_json::json!({
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": text}}]
+            }
+        }))
+        .send()
+        .await;
+    if let Err(e) = res {
+        tracing::warn!("Failed to send KakaoTalk callback: {e}");
     }
 }

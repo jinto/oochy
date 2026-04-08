@@ -222,6 +222,7 @@ pub enum ChannelType {
     Discord,
     Web,
     Desktop,
+    KakaoTalk,
 }
 
 impl std::fmt::Display for ChannelType {
@@ -232,6 +233,7 @@ impl std::fmt::Display for ChannelType {
             ChannelType::Discord => "discord",
             ChannelType::Web => "web",
             ChannelType::Desktop => "desktop",
+            ChannelType::KakaoTalk => "kakao_talk",
         };
         f.write_str(s)
     }
@@ -246,6 +248,7 @@ impl PartialEq<str> for ChannelType {
                 | (ChannelType::Discord, "discord")
                 | (ChannelType::Web, "web")
                 | (ChannelType::Desktop, "desktop")
+                | (ChannelType::KakaoTalk, "kakao_talk")
         )
     }
 }
@@ -256,6 +259,17 @@ impl PartialEq<&str> for ChannelType {
     }
 }
 
+/// KakaoTalk-specific channel configuration.
+///
+/// Unlike other channels, KakaoTalk uses a CF Worker relay instead of a direct API.
+/// - `relay_url`: The base URL of the deployed CF Worker (e.g., `https://relay.example.workers.dev`)
+/// - `user_token`: The per-user token used as the KV namespace key prefix
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct KakaoChannelConfig {
+    pub relay_url: String,
+    pub user_token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelConfig {
     pub channel_type: ChannelType,
@@ -263,6 +277,9 @@ pub struct ChannelConfig {
     pub token: String,
     #[serde(default)]
     pub bind_addr: Option<String>,
+    /// KakaoTalk-specific config. Required when channel_type = kakao_talk.
+    #[serde(default)]
+    pub kakao: Option<KakaoChannelConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -146,6 +146,7 @@ fn is_configured_channel(skill_name: &str, config: &kittypaw_core::config::Confi
         "Telegram" => ("telegram", "bot_token", "TELEGRAM_BOT_TOKEN"),
         "Slack" => ("slack", "bot_token", "SLACK_TOKEN"),
         "Discord" => ("discord", "bot_token", "DISCORD_TOKEN"),
+        "Kakao" => ("channels", "kakao_token", "KITTYPAW_KAKAO_TOKEN"),
         _ => return false,
     };
     resolve_channel_token(config, channel_type, secret_key, env_var).is_some()
@@ -158,7 +159,7 @@ fn is_configured_channel(skill_name: &str, config: &kittypaw_core::config::Confi
 /// - File: everything else (File, Env, Storage, Llm, Tts, …)
 pub(crate) fn resource_kind_for_skill(skill_name: &str) -> ResourceKind {
     match skill_name {
-        "Telegram" | "Http" | "Web" | "Slack" | "Discord" => ResourceKind::Network,
+        "Telegram" | "Http" | "Web" | "Slack" | "Discord" | "Kakao" => ResourceKind::Network,
         "Shell" | "Git" | "Agent" | "Moa" => ResourceKind::Execute,
         _ => ResourceKind::File,
     }

@@ -122,7 +122,6 @@
 
 ## v2 잔여
 
-- ~~카카오톡 연동~~ — **제외** (webhook-only API → 공개 서버 필수 → "3분 설치" 철학과 충돌. 텔레그램으로 충분)
 - [ ] 크로스 채널 컨텍스트 (사용자 ID 기반 통합)
 - [ ] 온보딩 폴더 접근 제어 + macOS NSOpenPanel
 - [ ] 스킬 무결성 검증 (체크섬, 서명)
@@ -138,6 +137,32 @@
 - [ ] /daily 모닝 브리핑 (Todoist + Calendar)
 - [ ] LLM 기반 파라미터 자동 조정
 - [ ] LLM 요약 (세션간 기억)
+
+---
+
+## KakaoTalk 채널 (Open Builder + CF Worker Relay) ← 현재
+
+> 스펙: `.ina/specs/20260409-0220-think-kakao-channel.md`
+> 플랜: `.claude/plans/kakao-channel-open-builder-relay.md`
+> TDD 원칙: 실패 테스트 먼저 → 구현 → 통과
+
+### Plan 1: KittyPaw Rust 채널 구현
+
+- [x] **K-1-T** 실패 테스트: `kakao_event_session_id`, `kakao_channel_name` (types.rs)
+- [x] **K-1** 구현: `EventType::KakaoTalk` + `session_id()` + `channel_name()` + `KakaoChannelConfig`
+- [x] **K-2-T** 실패 테스트: `kakao_channel_name_is_kakao`, `kakao_parses_openbuilder_payload` (MockRelayClient)
+- [x] **K-2** 구현: `kakao.rs` 신규 — `KakaoChannel` + `RelayClient` trait + `Channel` impl
+- [x] **K-3** 구현: `lib.rs` + `registry.rs` + `skill_executor/mod.rs` match arm 추가
+- [x] **K-4** 구현: `prompt.rs` (format_event) + `serve.rs` KakaoTalk 응답 라우팅
+- [x] **K-5** 검증: `cargo test --workspace` 통과
+
+### Plan 2: CF Worker Relay ← Plan 1 완료 후 진행
+
+- [x] **R-1** relay/ 초기화 (wrangler + vitest-pool-workers + TypeScript)
+- [x] **R-2-T** 실패 테스트: HMAC 검증 + KV 저장 (miniflare)
+- [x] **R-2** 구현: `POST /webhook` — HMAC 검증 → useCallback 반환 → KV 저장
+- [x] **R-3-T** 실패 테스트: atomic poll (fetch+delete)
+- [x] **R-3** 구현: `POST /poll/{user_token}` — atomic fetch+delete, 없으면 204
 
 ---
 

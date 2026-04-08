@@ -162,6 +162,14 @@ pub(super) fn format_event(event: &Event) -> String {
                 .unwrap_or("");
             format!("[Desktop] (workspace={workspace}): {text}")
         }
+        EventType::KakaoTalk => {
+            let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let user_id = payload
+                .get("user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            format!("[KakaoTalk] (user_id={user_id}): {text}")
+        }
     }
 }
 
