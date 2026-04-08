@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::error::{KittypawError, Result};
 
 /// Controls what skill operations are allowed at runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AutonomyLevel {
     /// Only read operations (Http.get, Storage.get, File.read, etc.)
@@ -14,13 +14,8 @@ pub enum AutonomyLevel {
     /// Write operations require user confirmation via permission callback
     Supervised,
     /// All operations allowed (default)
+    #[default]
     Full,
-}
-
-impl Default for AutonomyLevel {
-    fn default() -> Self {
-        Self::Full
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

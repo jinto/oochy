@@ -78,7 +78,7 @@ fn save_store(path: &Path, store: &HashMap<String, String>) -> Result<()> {
         .map_err(|e| KittypawError::Config(format!("Failed to serialize secret store: {e}")))?;
     write_restricted(&tmp_path, &content)?;
 
-    if let Err(_) = std::fs::rename(&tmp_path, path) {
+    if std::fs::rename(&tmp_path, path).is_err() {
         // Cross-device rename; fall back to copy (never deletes target first)
         std::fs::copy(&tmp_path, path)?;
         let _ = std::fs::remove_file(&tmp_path);

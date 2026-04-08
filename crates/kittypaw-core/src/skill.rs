@@ -7,17 +7,13 @@ use crate::error::{KittypawError, Result};
 /// Skill format: KittyPaw native (.skill.toml + .js) or agentskills.io standard (SKILL.md).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum SkillFormat {
     /// KittyPaw native: .skill.toml + .js, executed in QuickJS sandbox
+    #[default]
     Native,
     /// agentskills.io standard: SKILL.md, executed via LLM prompt injection
     SkillMd,
-}
-
-impl Default for SkillFormat {
-    fn default() -> Self {
-        Self::Native
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,8 +194,7 @@ fn parse_skill_md(path: &Path) -> Result<Option<(Skill, String)>> {
     let content = std::fs::read_to_string(path)?;
 
     // Parse YAML frontmatter (between --- delimiters)
-    let (name, description, body) = if content.starts_with("---") {
-        let rest = &content[3..];
+    let (name, description, body) = if let Some(rest) = content.strip_prefix("---") {
         if let Some(end) = rest.find("---") {
             let frontmatter = &rest[..end].trim();
             let body = rest[end + 3..].trim().to_string();
