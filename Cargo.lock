@@ -3337,6 +3337,7 @@ dependencies = [
 name = "kittypaw-store"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "kittypaw-core",
  "rusqlite",
  "rusqlite_migration",

@@ -17,8 +17,7 @@ mod telegram;
 mod todo;
 mod tts;
 
-use std::sync::atomic::AtomicU32;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU32, Arc};
 use tokio::sync::Mutex;
 
 use kittypaw_core::capability::CapabilityChecker;

@@ -12,7 +12,7 @@ pub async fn attempt_auto_fix(
     error_msg: &str,
     config: &kittypaw_core::config::Config,
     sandbox: &kittypaw_sandbox::sandbox::Sandbox,
-    db_path: &str,
+    store: &std::sync::Arc<tokio::sync::Mutex<kittypaw_store::Store>>,
 ) -> Option<AutoFixResult> {
     // Only in Full or Supervised autonomy mode
     let is_full = config.autonomy_level == kittypaw_core::config::AutonomyLevel::Full;
@@ -79,24 +79,14 @@ pub async fn attempt_auto_fix(
             let new_code = code.clone();
             let error_short = error_msg.chars().take(500).collect::<String>();
 
-            // Open store for recording the fix
-            let store = match kittypaw_store::Store::open(db_path) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!("Cannot open store for fix recording: {e}");
-                    // Still try to apply in full mode even without recording
-                    if is_full {
-                        let _ = crate::teach_loop::approve_skill(result);
-                    }
-                    return None;
-                }
-            };
+            // Lock the shared store for recording the fix
+            let s = store.lock().await;
 
             if is_full {
                 // Full mode: apply immediately
                 match crate::teach_loop::approve_skill(result) {
                     Ok(()) => {
-                        let fix_id = match store.record_fix(
+                        let fix_id = match s.record_fix(
                             skill_id,
                             &error_short,
                             &old_code,
@@ -125,14 +115,14 @@ pub async fn attempt_auto_fix(
                 }
             } else {
                 // Supervised mode: record but don't apply
-                let fix_id =
-                    match store.record_fix(skill_id, &error_short, &old_code, &new_code, false) {
-                        Ok(id) => id,
-                        Err(e) => {
-                            tracing::warn!("Fix recording failed for '{skill_id}': {e}");
-                            return None;
-                        }
-                    };
+                let fix_id = match s.record_fix(skill_id, &error_short, &old_code, &new_code, false)
+                {
+                    Ok(id) => id,
+                    Err(e) => {
+                        tracing::warn!("Fix recording failed for '{skill_id}': {e}");
+                        return None;
+                    }
+                };
                 tracing::info!(
                     "Auto-fix generated for skill '{skill_id}' (fix #{fix_id}, pending approval)"
                 );

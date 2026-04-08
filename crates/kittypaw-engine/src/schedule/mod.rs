@@ -21,27 +21,31 @@ pub async fn run_schedule_loop(
     sandbox: &kittypaw_sandbox::sandbox::Sandbox,
     db_path: &str,
 ) {
-    init_schedule_db(db_path).ok();
     let data_dir = std::path::Path::new(db_path)
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
         .to_path_buf();
+
+    // Open the store once and wrap in Arc<Mutex> for shared async access.
+    // Store::open runs all migrations (including schedule table creation).
+    let store = match kittypaw_store::Store::open(db_path) {
+        Ok(s) => std::sync::Arc::new(tokio::sync::Mutex::new(s)),
+        Err(e) => {
+            tracing::error!("Failed to open store for schedule loop: {e}");
+            return;
+        }
+    };
+
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
     loop {
         interval.tick().await;
 
-        // Housekeeping — open store briefly for cleanup, then drop before next await.
-        // rusqlite::Connection is !Send, so it must be dropped before any await point.
+        // Housekeeping — lock the store briefly for sync cleanup, then drop before next await.
+        // rusqlite::Connection is !Sync, so the MutexGuard must be dropped before any await.
         let (shared_ctx, pkg_contexts) = {
-            let store = match kittypaw_store::Store::open(db_path) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!("Failed to open store for schedule loop: {e}");
-                    continue;
-                }
-            };
-            let _ = store.cleanup_old_executions(30);
-            let _ = store.cleanup_old_turns(30);
+            let s = store.lock().await;
+            let _ = s.cleanup_old_executions(30);
+            let _ = s.cleanup_old_turns(30);
             // Clean up execution.jsonl — delete if larger than 10MB
             {
                 let log_path = data_dir.join("execution.jsonl");
@@ -56,7 +60,7 @@ pub async fn run_schedule_loop(
 
             // Pre-compute package contexts while we have the store
             let packages_dir = data_dir.join("packages");
-            let shared_ctx = store.list_shared_context().unwrap_or_default();
+            let shared_ctx = s.list_shared_context().unwrap_or_default();
             let pkg_contexts: Vec<_> = if let Ok(packages) =
                 kittypaw_core::package_manager::load_all_packages(&packages_dir)
             {
@@ -65,12 +69,12 @@ pub async fn run_schedule_loop(
                 packages
                     .into_iter()
                     .filter(|(pkg, _)| {
-                        let last_run = get_last_run(db_path, &pkg.meta.id);
+                        let last_run = s.get_last_run(&pkg.meta.id);
                         is_package_due(pkg, last_run)
                     })
                     .map(|(pkg, js_code)| {
                         let (context, config_values, input_params) =
-                            prepare_package_context(&pkg, &store, &pkg_mgr, &shared_ctx);
+                            prepare_package_context(&pkg, &*s, &pkg_mgr, &shared_ctx);
                         (pkg, js_code, context, config_values, input_params)
                     })
                     .collect()
@@ -79,7 +83,7 @@ pub async fn run_schedule_loop(
             };
             (shared_ctx, pkg_contexts)
         };
-        // store is now dropped — safe to await
+        // store lock is now released — safe to await
 
         let notifier = NotificationSender::new(config);
 
@@ -89,12 +93,15 @@ pub async fn run_schedule_loop(
                 if skill.trigger.trigger_type != "schedule" || !skill.enabled {
                     continue;
                 }
-                let last_run = get_last_run(db_path, &skill.name);
+                let last_run = {
+                    let s = store.lock().await;
+                    s.get_last_run(&skill.name)
+                };
                 if !is_due(skill, last_run) {
                     continue;
                 }
                 execute_scheduled_skill(
-                    skill, js_code, config, sandbox, &notifier, &data_dir, db_path,
+                    skill, js_code, config, sandbox, &notifier, &data_dir, db_path, &store,
                 )
                 .await;
             }
@@ -113,7 +120,7 @@ pub async fn run_schedule_loop(
                     sandbox,
                     &notifier,
                     &data_dir,
-                    db_path,
+                    &store,
                     &pkg_mgr,
                     &shared_ctx,
                     context.clone(),

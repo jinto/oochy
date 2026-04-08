@@ -20,6 +20,7 @@ mod fixes;
 pub mod identity;
 mod memory_provider;
 mod permission;
+mod schedule;
 mod storage;
 
 pub use checkpoint::Checkpoint;
@@ -44,6 +45,7 @@ fn migrations() -> Migrations<'static> {
         M::up(include_str!("migrations/010_checkpoints.sql")),
         M::up(include_str!("migrations/011_audit_log.sql")),
         M::up(include_str!("migrations/012_global_grants.sql")),
+        M::up(include_str!("migrations/013_skill_schedule.sql")),
     ])
 }
 

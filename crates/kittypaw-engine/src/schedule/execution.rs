@@ -4,10 +4,6 @@ use kittypaw_core::skill::Skill;
 
 use super::auto_fix::attempt_auto_fix;
 use super::notification::NotificationSender;
-use super::persistence::{
-    get_failure_count, increment_failure_count, reset_failure_count, set_backoff_delay,
-    set_last_run,
-};
 
 const MAX_RESULT_LEN: usize = 500;
 
@@ -39,7 +35,6 @@ pub fn append_execution_log(
 #[allow(clippy::too_many_arguments)]
 pub fn handle_execution_failure(
     store: &kittypaw_store::Store,
-    db_path: &str,
     id: &str,
     name: &str,
     started_at: chrono::DateTime<chrono::Utc>,
@@ -48,8 +43,8 @@ pub fn handle_execution_failure(
     can_disable: bool,
     usage_json: Option<&str>,
 ) {
-    increment_failure_count(db_path, id).ok();
-    let failures = get_failure_count(db_path, id);
+    store.increment_failure_count(id).ok();
+    let failures = store.get_failure_count(id);
     let finished_at = chrono::Utc::now();
     let duration_ms = (finished_at - started_at).num_milliseconds();
     let _ = store.record_execution(
@@ -82,7 +77,7 @@ pub fn handle_execution_failure(
             let _ = kittypaw_core::skill::disable_skill(id);
         } else {
             // Package cannot be disabled, but still apply backoff to prevent infinite retry loop
-            set_backoff_delay(db_path, id, failures).ok();
+            store.set_backoff_delay(id, failures).ok();
             tracing::warn!(
                 "Package '{}' failed {} times, backing off {} seconds",
                 name,
@@ -91,7 +86,7 @@ pub fn handle_execution_failure(
             );
         }
     } else {
-        set_backoff_delay(db_path, id, failures).ok();
+        store.set_backoff_delay(id, failures).ok();
         tracing::info!(
             "Skill '{}' will retry in {} seconds (attempt {}/3)",
             name,
@@ -106,7 +101,6 @@ pub fn handle_run_failure(
     store: &kittypaw_store::Store,
     notifier: &NotificationSender,
     data_dir: &std::path::Path,
-    db_path: &str,
     id: &str,
     name: &str,
     started_at: DateTime<Utc>,
@@ -117,12 +111,11 @@ pub fn handle_run_failure(
 ) {
     let finished_at = Utc::now();
     let duration_ms = (finished_at - started_at).num_milliseconds();
-    let failures = get_failure_count(db_path, id) + 1;
+    let failures = store.get_failure_count(id) + 1;
     let delay_secs = 60u64 * (1u64 << failures.min(10));
     notifier.notify_retry(id, failures, delay_secs);
     handle_execution_failure(
         store,
-        db_path,
         id,
         name,
         started_at,
@@ -139,7 +132,6 @@ pub fn handle_run_success(
     store: &kittypaw_store::Store,
     notifier: &NotificationSender,
     data_dir: &std::path::Path,
-    db_path: &str,
     id: &str,
     name: &str,
     started_at: DateTime<Utc>,
@@ -161,8 +153,8 @@ pub fn handle_run_success(
         Some(input_params),
         usage_json,
     );
-    set_last_run(db_path, id, Utc::now()).ok();
-    reset_failure_count(db_path, id).ok();
+    store.set_last_run(id, Utc::now()).ok();
+    store.reset_failure_count(id).ok();
 
     // Clear failure hint on success (self-improvement: retry succeeded)
     let hint_key = format!("failure_hint:{}", id);
@@ -224,6 +216,7 @@ pub async fn execute_scheduled_skill(
     notifier: &NotificationSender,
     data_dir: &std::path::Path,
     db_path: &str,
+    store: &std::sync::Arc<tokio::sync::Mutex<kittypaw_store::Store>>,
 ) {
     tracing::info!("Running scheduled skill: {}", skill.name);
     let context = serde_json::json!({
@@ -278,33 +271,24 @@ pub async fn execute_scheduled_skill(
         Ok(result) if result.success => {
             // Skill calls are already resolved inline by the skill_resolver.
             // No need for 2-phase execute_skill_calls — just record success.
-            // Store must be re-opened after the sandbox await: rusqlite::Connection is !Send.
-            let store = match kittypaw_store::Store::open(db_path) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!("Failed to open store for skill '{}': {e}", skill.name);
-                    return;
-                }
-            };
-            {
-                tracing::info!(
-                    "Scheduled skill '{}' completed: {}",
-                    skill.name,
-                    result.output
-                );
-                handle_run_success(
-                    &store,
-                    notifier,
-                    data_dir,
-                    db_path,
-                    &skill.name,
-                    &skill.name,
-                    started_at,
-                    &result.output,
-                    &input_params,
-                    None,
-                );
-            }
+            // Lock the shared store after the sandbox await.
+            let s = store.lock().await;
+            tracing::info!(
+                "Scheduled skill '{}' completed: {}",
+                skill.name,
+                result.output
+            );
+            handle_run_success(
+                &*s,
+                notifier,
+                data_dir,
+                &skill.name,
+                &skill.name,
+                started_at,
+                &result.output,
+                &input_params,
+                None,
+            );
         }
         Ok(result) => {
             tracing::warn!(
@@ -313,82 +297,79 @@ pub async fn execute_scheduled_skill(
                 result.error
             );
             let error_msg = result.error.unwrap_or_default();
-            if let Ok(store) = kittypaw_store::Store::open(db_path) {
-                handle_run_failure(
-                    &store,
-                    notifier,
-                    data_dir,
-                    db_path,
-                    &skill.name,
-                    &skill.name,
-                    started_at,
-                    &error_msg,
-                    &input_params,
-                    true,
-                    None,
-                );
-                // Auto-fix: attempt on 2nd failure if not already tried
-                let failures = get_failure_count(db_path, &skill.name);
-                let hint = store
-                    .get_user_context(&format!("failure_hint:{}", skill.name))
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                if failures == 2 && !hint.contains("|auto_fix_attempted") {
-                    if let Some(fix_result) =
-                        attempt_auto_fix(&skill.name, &error_msg, config, sandbox, db_path).await
-                    {
-                        if fix_result.applied {
-                            reset_failure_count(db_path, &skill.name).ok();
-                            let _ = store.set_user_context(
-                                &format!("failure_hint:{}", skill.name),
-                                "",
-                                "auto_fixed",
-                            );
-                            if fix_result.fix_id > 0 {
-                                notifier.notify_fix_applied(
-                                    &skill.name,
-                                    &error_msg,
-                                    fix_result.fix_id,
-                                );
-                            } else {
-                                notifier.notify_recovery(&skill.name);
-                            }
+            let s = store.lock().await;
+            handle_run_failure(
+                &*s,
+                notifier,
+                data_dir,
+                &skill.name,
+                &skill.name,
+                started_at,
+                &error_msg,
+                &input_params,
+                true,
+                None,
+            );
+            // Auto-fix: attempt on 2nd failure if not already tried
+            let failures = s.get_failure_count(&skill.name);
+            let hint = s
+                .get_user_context(&format!("failure_hint:{}", skill.name))
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            // Drop the lock before the await in attempt_auto_fix
+            drop(s);
+            if failures == 2 && !hint.contains("|auto_fix_attempted") {
+                if let Some(fix_result) =
+                    attempt_auto_fix(&skill.name, &error_msg, config, sandbox, store).await
+                {
+                    let s = store.lock().await;
+                    if fix_result.applied {
+                        s.reset_failure_count(&skill.name).ok();
+                        let _ = s.set_user_context(
+                            &format!("failure_hint:{}", skill.name),
+                            "",
+                            "auto_fixed",
+                        );
+                        drop(s);
+                        if fix_result.fix_id > 0 {
+                            notifier.notify_fix_applied(&skill.name, &error_msg, fix_result.fix_id);
                         } else {
-                            notifier.notify_fix_pending(&skill.name, &error_msg, fix_result.fix_id);
-                            let _ = store.set_user_context(
-                                &format!("failure_hint:{}", skill.name),
-                                &format!("{hint}|auto_fix_attempted"),
-                                "auto",
-                            );
+                            notifier.notify_recovery(&skill.name);
                         }
                     } else {
-                        let _ = store.set_user_context(
+                        notifier.notify_fix_pending(&skill.name, &error_msg, fix_result.fix_id);
+                        let _ = s.set_user_context(
                             &format!("failure_hint:{}", skill.name),
                             &format!("{hint}|auto_fix_attempted"),
                             "auto",
                         );
                     }
+                } else {
+                    let s = store.lock().await;
+                    let _ = s.set_user_context(
+                        &format!("failure_hint:{}", skill.name),
+                        &format!("{hint}|auto_fix_attempted"),
+                        "auto",
+                    );
                 }
             }
         }
         Err(e) => {
             tracing::error!("Scheduled skill '{}' execution error: {e}", skill.name);
-            if let Ok(store) = kittypaw_store::Store::open(db_path) {
-                handle_run_failure(
-                    &store,
-                    notifier,
-                    data_dir,
-                    db_path,
-                    &skill.name,
-                    &skill.name,
-                    started_at,
-                    &e.to_string(),
-                    &input_params,
-                    true,
-                    None,
-                );
-            }
+            let s = store.lock().await;
+            handle_run_failure(
+                &*s,
+                notifier,
+                data_dir,
+                &skill.name,
+                &skill.name,
+                started_at,
+                &e.to_string(),
+                &input_params,
+                true,
+                None,
+            );
         }
     }
 }
@@ -400,7 +381,7 @@ pub async fn execute_chain_steps(
     pkg_mgr: &kittypaw_core::package_manager::PackageManager,
     config: &kittypaw_core::config::Config,
     sandbox: &kittypaw_sandbox::sandbox::Sandbox,
-    db_path: &str,
+    store: &std::sync::Arc<tokio::sync::Mutex<kittypaw_store::Store>>,
     shared_ctx: &std::collections::HashMap<String, String>,
 ) {
     let chain_steps = match pkg_mgr.load_chain(pkg) {
@@ -422,24 +403,15 @@ pub async fn execute_chain_steps(
         match sandbox.execute(&chain_wrapped, chain_context).await {
             Ok(chain_result) if chain_result.success => {
                 // Execute captured skill calls (Telegram, Http, etc.)
-                // Store must be re-opened after the chain await: rusqlite::Connection is !Send.
+                // Lock the shared store after the chain await.
                 if !chain_result.skill_calls.is_empty() {
-                    let store = match kittypaw_store::Store::open(db_path) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to open store for chain step '{}': {e}",
-                                chain_pkg.meta.id
-                            );
-                            break;
-                        }
-                    };
+                    let s = store.lock().await;
                     let preresolved = crate::skill_executor::resolve_storage_calls(
                         &chain_result.skill_calls,
-                        &store,
+                        &*s,
                         Some(&chain_pkg.meta.id),
                     );
-                    let http_network_granted = store.has_capability_grant("http").unwrap_or(false);
+                    let http_network_granted = s.has_capability_grant("http").unwrap_or(false);
                     let mut checker =
                         kittypaw_core::capability::CapabilityChecker::from_package_permissions(
                             &chain_pkg.permissions,
@@ -450,6 +422,8 @@ pub async fn execute_chain_steps(
                         .get(step_idx)
                         .and_then(|s| s.model.as_deref())
                         .or(chain_pkg.model.as_deref());
+                    // Drop lock before the execute_skill_calls await
+                    drop(s);
                     match crate::skill_executor::execute_skill_calls(
                         &chain_result.skill_calls,
                         config,
@@ -557,7 +531,7 @@ pub async fn execute_scheduled_package(
     sandbox: &kittypaw_sandbox::sandbox::Sandbox,
     notifier: &NotificationSender,
     data_dir: &std::path::Path,
-    db_path: &str,
+    store: &std::sync::Arc<tokio::sync::Mutex<kittypaw_store::Store>>,
     pkg_mgr: &kittypaw_core::package_manager::PackageManager,
     shared_ctx: &std::collections::HashMap<String, String>,
     context: serde_json::Value,
@@ -568,21 +542,15 @@ pub async fn execute_scheduled_package(
     let started_at = Utc::now();
     match sandbox.execute(&wrapped, context).await {
         Ok(result) if result.success => {
-            // Open a fresh store after the await point (Store is !Sync)
-            let store = match kittypaw_store::Store::open(db_path) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!("Failed to open store for package '{}': {e}", pkg.meta.id);
-                    return;
-                }
-            };
+            // Lock the shared store after the await point.
+            let s = store.lock().await;
             let call_error: Option<String> = if !result.skill_calls.is_empty() {
                 let preresolved = crate::skill_executor::resolve_storage_calls(
                     &result.skill_calls,
-                    &store,
+                    &*s,
                     Some(&pkg.meta.id),
                 );
-                let http_network_granted = store.has_capability_grant("http").unwrap_or(false);
+                let http_network_granted = s.has_capability_grant("http").unwrap_or(false);
                 let mut checker =
                     kittypaw_core::capability::CapabilityChecker::from_package_permissions(
                         &pkg.permissions,
@@ -593,6 +561,8 @@ pub async fn execute_scheduled_package(
                         .map(String::as_str)
                         .filter(|s| !s.is_empty())
                 });
+                // Drop lock before execute_skill_calls await
+                drop(s);
                 match crate::skill_executor::execute_skill_calls(
                     &result.skill_calls,
                     config,
@@ -611,8 +581,10 @@ pub async fn execute_scheduled_package(
                     Err(e) => Some(e.to_string()),
                 }
             } else {
+                drop(s);
                 None
             };
+            let s = store.lock().await;
             if let Some(ref err_msg) = call_error {
                 tracing::warn!(
                     "Scheduled package '{}' skill_call failed: {}",
@@ -620,10 +592,9 @@ pub async fn execute_scheduled_package(
                     err_msg
                 );
                 handle_run_failure(
-                    &store,
+                    &*s,
                     notifier,
                     data_dir,
-                    db_path,
                     &pkg.meta.id,
                     &pkg.meta.name,
                     started_at,
@@ -639,10 +610,9 @@ pub async fn execute_scheduled_package(
                     result.output
                 );
                 handle_run_success(
-                    &store,
+                    &*s,
                     notifier,
                     data_dir,
-                    db_path,
                     &pkg.meta.id,
                     &pkg.meta.name,
                     started_at,
@@ -650,6 +620,8 @@ pub async fn execute_scheduled_package(
                     input_params,
                     None,
                 );
+                // Drop lock before execute_chain_steps await
+                drop(s);
 
                 // Execute chain steps if present
                 if !pkg.chain.is_empty() {
@@ -659,7 +631,7 @@ pub async fn execute_scheduled_package(
                         pkg_mgr,
                         config,
                         sandbox,
-                        db_path,
+                        store,
                         shared_ctx,
                     )
                     .await;
@@ -673,39 +645,35 @@ pub async fn execute_scheduled_package(
                 result.error
             );
             let error_msg = result.error.unwrap_or_default();
-            if let Ok(store) = kittypaw_store::Store::open(db_path) {
-                handle_run_failure(
-                    &store,
-                    notifier,
-                    data_dir,
-                    db_path,
-                    &pkg.meta.id,
-                    &pkg.meta.name,
-                    started_at,
-                    &error_msg,
-                    input_params,
-                    false,
-                    None,
-                );
-            }
+            let s = store.lock().await;
+            handle_run_failure(
+                &*s,
+                notifier,
+                data_dir,
+                &pkg.meta.id,
+                &pkg.meta.name,
+                started_at,
+                &error_msg,
+                input_params,
+                false,
+                None,
+            );
         }
         Err(e) => {
             tracing::error!("Scheduled package '{}' execution error: {e}", pkg.meta.id);
-            if let Ok(store) = kittypaw_store::Store::open(db_path) {
-                handle_run_failure(
-                    &store,
-                    notifier,
-                    data_dir,
-                    db_path,
-                    &pkg.meta.id,
-                    &pkg.meta.name,
-                    started_at,
-                    &e.to_string(),
-                    input_params,
-                    false,
-                    None,
-                );
-            }
+            let s = store.lock().await;
+            handle_run_failure(
+                &*s,
+                notifier,
+                data_dir,
+                &pkg.meta.id,
+                &pkg.meta.name,
+                started_at,
+                &e.to_string(),
+                input_params,
+                false,
+                None,
+            );
         }
     }
 }

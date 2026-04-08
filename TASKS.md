@@ -28,8 +28,10 @@
 - [x] **H-1** `build_skills_prompt()` 예산 관리
   - `skill_registry.rs`: 4,000바이트 상한 (`SKILL_BUDGET_BYTES`), 초과 시 이름만 표시
 
-- [ ] **H-2** 스케줄 경로 `Store::open` 반복 제거 (보류)
-  - `rusqlite::Connection`의 `Send` 여부 + sandbox thread model 확인 필요
+- [x] **H-2** 스케줄 경로 `Store::open` 반복 제거
+  - `Arc<tokio::sync::Mutex<Store>>` 공유 인스턴스로 해결
+  - migration 013: `skill_schedule` 테이블을 Store 마이그레이션으로 흡수
+  - `persistence.rs` 함수 → `kittypaw_store::Store` 메서드로 이관
 
 - [x] **H-3** `skill.name` == `skill.id` 확인 — 설계상 동일 (false positive, 수정 불필요)
 
