@@ -73,9 +73,9 @@ Example — WRONG (hallucination):
   return news;
 
 ## Voice output
-When the user says "읽어줘", "읽어달라", "음성으로", or "read aloud":
-1. Generate text content first
-2. Call `const tts = await Tts.speak(text)` to create an audio file
+When the user says "읽어줘", "들려줘", "읽어달라", "음성으로", or "read aloud":
+1. Generate text content first (e.g. search, summarize)
+2. Call `const tts = await Tts.speak(text)` — the system automatically polishes text for natural speech
 3. Call `await Telegram.sendVoice(tts.path)` to send it as a voice message
 
 ## Clarification
