@@ -29,6 +29,11 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
     let mut tg_chat_id = use_signal(String::new);
     let mut tg_saved = use_signal(|| false);
 
+    // Search backend signals
+    let mut search_backend = use_signal(|| "ddg".to_string());
+    let mut search_api_key = use_signal(String::new);
+    let mut search_saved = use_signal(|| false);
+
     // Slack channel signals
     let mut slack_token = use_signal(String::new);
     let mut slack_saved = use_signal(|| false);
@@ -65,6 +70,31 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
             }
             if let Ok(Some(chat_id)) = kittypaw_core::secrets::get_secret("channels", "chat_id") {
                 tg_chat_id.set(chat_id);
+            }
+
+            // Load stored search backend config
+            let backend_val = kittypaw_core::secrets::get_secret("search", "backend")
+                .ok()
+                .flatten()
+                .filter(|b| !b.is_empty())
+                .unwrap_or_else(|| "ddg".to_string());
+            search_backend.set(backend_val.clone());
+
+            // Load the API key for the current search backend
+            let key_name = match backend_val.as_str() {
+                "brave" => Some("brave_api_key"),
+                "tavily" => Some("tavily_api_key"),
+                "exa" => Some("exa_api_key"),
+                _ => None,
+            };
+            if let Some(name) = key_name {
+                if let Ok(Some(key)) = kittypaw_core::secrets::get_secret("search", name) {
+                    if !key.is_empty() {
+                        let len = key.len();
+                        let suffix = &key[len.saturating_sub(4)..];
+                        search_api_key.set(format!("...{suffix}"));
+                    }
+                }
             }
 
             // Load stored Slack channel config
@@ -255,6 +285,92 @@ pub fn SettingsDialog(on_close: EventHandler) -> Element {
                     "Ollama, LM Studio 등 OpenAI 호환 API 서버를 연결합니다."
                     br {}
                     "로컬 모델 연결 시 API 키 없이 무료로 사용할 수 있습니다."
+                }
+            }
+
+            // ── Web Search backend section ──
+            div {
+                style: "background: #FFFFFF; border: 1px solid #E7E5E4; border-radius: 10px; padding: 24px; margin-bottom: 16px;",
+
+                div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 16px;",
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                    span { style: "font-size: 12px; font-weight: 600; color: #78716C; white-space: nowrap;",
+                        { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.search") }
+                    }
+                    div { style: "flex: 1; height: 1px; background: #E7E5E4;" }
+                }
+
+                div { style: "margin-bottom: 12px;",
+                    label { style: "display: block; font-size: 13px; font-weight: 600; color: #1C1917; margin-bottom: 6px;",
+                        { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.search_backend") }
+                    }
+                    select {
+                        style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917; cursor: pointer;",
+                        value: "{search_backend}",
+                        oninput: move |e: Event<FormData>| {
+                            search_backend.set(e.value());
+                            search_api_key.set(String::new());
+                            search_saved.set(false);
+                        },
+                        option { value: "ddg", selected: search_backend() == "ddg", "DuckDuckGo (free)" }
+                        option { value: "brave", selected: search_backend() == "brave", "Brave Search" }
+                        option { value: "tavily", selected: search_backend() == "tavily", "Tavily" }
+                        option { value: "exa", selected: search_backend() == "exa", "Exa" }
+                    }
+                }
+
+                // Conditional API key input (only for paid backends)
+                if search_backend() != "ddg" {
+                    div { style: "margin-bottom: 14px;",
+                        label { style: "display: block; font-size: 13px; font-weight: 600; color: #1C1917; margin-bottom: 6px;",
+                            { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.search_api_key") }
+                        }
+                        input {
+                            style: "width: 100%; padding: 10px 12px; border: 1px solid #E7E5E4; border-radius: 6px; font-size: 13px; font-family: monospace; outline: none; box-sizing: border-box; background: #F5F3F0; color: #1C1917;",
+                            r#type: "password",
+                            placeholder: "API key...",
+                            value: "{search_api_key}",
+                            oninput: move |e| {
+                                search_api_key.set(e.value());
+                                search_saved.set(false);
+                            },
+                        }
+                    }
+                }
+
+                div { style: "display: flex; justify-content: flex-end; margin-bottom: 14px;",
+                    button {
+                        style: "padding: 8px 20px; background: #1C1917; color: #F5F3F0; border: none; border-radius: 6px; font-size: 13px; cursor: pointer;",
+                        onclick: move |_| {
+                            let backend = search_backend.read().clone();
+                            let api_key_val = search_api_key.read().clone();
+
+                            // Save backend choice
+                            let _ = kittypaw_core::secrets::set_secret("search", "backend", &backend);
+
+                            // Save API key for the selected backend (skip masked/empty values)
+                            if backend != "ddg" && !api_key_val.starts_with("...") && !api_key_val.is_empty() {
+                                let key_name = match backend.as_str() {
+                                    "brave" => "brave_api_key",
+                                    "tavily" => "tavily_api_key",
+                                    "exa" => "exa_api_key",
+                                    _ => return, // Unknown backend — don't save
+                                };
+                                let _ = kittypaw_core::secrets::set_secret("search", key_name, &api_key_val);
+                            }
+
+                            search_saved.set(true);
+                        },
+                        if search_saved() {
+                            { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.saved") }
+                        } else {
+                            { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.save") }
+                        }
+                    }
+                }
+
+                p { style: "font-size: 12px; color: #78716C; line-height: 1.5;",
+                    { use_context::<Signal<crate::i18n::I18n>>().read().t("settings.search_desc") }
                 }
             }
 

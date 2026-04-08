@@ -1,7 +1,7 @@
 # 할 일
 
 - [x] **메모리 레이어 충돌 해결 정책** — 양방향 write-through (save→USER.md, user→DB) + 프롬프트 dedup (Remembered Facts에서 USER.md 키 제외)
-- [ ] **온보딩에 검색 API 키 설정 추가** — Web.search 백엔드(Brave/Tavily/Exa) API 키를 온보딩 위자드에서 입력받도록. 키 없으면 DuckDuckGo fallback(제한적) 안내.
+- [ ] **Web.search 무설정 기본값 + 폴백 체인** — DuckDuckGo를 기본 백엔드로 (API 키 불필요, 온보딩 변경 없음). Settings 고급 탭에서 SearXNG URL / Brave / Tavily 키 선택적 입력. 유료 API 실패 시 DuckDuckGo 자동 폴백. (리서치: docs/20260409-1500-research-agent-web-search.md)
 - [x] **Telegram 메시지 길이 제한 처리** — split_telegram_text() 순수 함수로 4096자 자동 분할. core/engine/channels 3곳 적용.
 - [x] **Web.search 쿼리 언어 매칭** — SYSTEM_PROMPT에 "사용자 언어와 같은 언어로 검색 쿼리 생성" 가이드 추가.
 - [x] **Telegram send 통합** — send_text_chunked() 단일 게이트웨이로 3곳 통합 완료. engine/channels는 1줄 호출로 축소.
