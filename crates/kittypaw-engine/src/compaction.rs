@@ -178,6 +178,14 @@ pub fn compact_turns(
     config: &CompactionConfig,
     mode: &CompactionMode,
 ) -> Vec<LlmMessage> {
+    // Invariant: windows must fit within the DB load budget so no turns are silently dropped.
+    debug_assert!(
+        config.recent_window + config.middle_window <= kittypaw_core::types::MAX_HISTORY_TURNS,
+        "CompactionConfig windows ({} + {}) exceed MAX_HISTORY_TURNS ({})",
+        config.recent_window,
+        config.middle_window,
+        kittypaw_core::types::MAX_HISTORY_TURNS
+    );
     let total = turns.len();
     let recent_start = total.saturating_sub(config.recent_window);
     let middle_start = recent_start.saturating_sub(config.middle_window);
@@ -384,6 +392,20 @@ mod tests {
         assert!(
             summary.contains("코드 실행 2번"),
             "Expected 코드 실행 2번 in: {summary}"
+        );
+    }
+
+    /// M-3: CompactionConfig windows must not exceed MAX_HISTORY_TURNS.
+    /// Ensures the DB load limit and compaction windows stay in sync.
+    #[test]
+    fn test_compaction_windows_within_db_limit() {
+        let cfg = CompactionConfig::default();
+        assert!(
+            cfg.recent_window + cfg.middle_window <= kittypaw_core::types::MAX_HISTORY_TURNS,
+            "default CompactionConfig windows ({} + {}) must fit within MAX_HISTORY_TURNS ({})",
+            cfg.recent_window,
+            cfg.middle_window,
+            kittypaw_core::types::MAX_HISTORY_TURNS
         );
     }
 

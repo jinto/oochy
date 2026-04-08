@@ -92,14 +92,15 @@ impl Store {
     }
 
     pub(crate) fn recent_turns_all(&self, agent_id: &str) -> Result<Vec<ConversationTurn>> {
+        let limit = kittypaw_core::types::MAX_HISTORY_TURNS as i64;
         let mut stmt = self.conn.prepare(
             "SELECT role, content, code, result, timestamp \
                  FROM conversations WHERE agent_id = ?1 \
-                 ORDER BY timestamp ASC, id ASC LIMIT 100",
+                 ORDER BY timestamp ASC, id ASC LIMIT ?2",
         )?;
 
         let turns: Vec<ConversationTurn> = stmt
-            .query_map(params![agent_id], map_turn_row)?
+            .query_map(params![agent_id, limit], map_turn_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
         Ok(turns)

@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Maximum number of conversation turns loaded from the database per session.
+///
+/// Both the store (SQL `LIMIT`) and the compaction engine must reference this constant
+/// so that changes to one automatically catch mismatches in the other.
+/// Invariant: `CompactionConfig::recent_window + middle_window` must not exceed this value.
+pub const MAX_HISTORY_TURNS: usize = 100;
+
 /// Returns the current time as a Unix-epoch seconds string (UTC).
 pub fn now_timestamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};

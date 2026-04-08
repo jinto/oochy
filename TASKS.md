@@ -45,9 +45,9 @@
   - **TDD**: `app_paths_derived_from_config()` 실패 테스트 먼저
   - `schedule/mod.rs:58`, `skill.rs:71`: `.kittypaw/*` 경로를 config에서 파생
 
-- [ ] **M-3** 메모리 컨텍스트 상한 확인 (look01.md: 292에이전트 교훈)
-  - **TDD**: `compact_turns_respects_cap()` 실패 테스트 먼저
-  - `compaction.rs` `compact_turns()` 상한 파악 및 캡 설정
+- [x] **M-3** 메모리 컨텍스트 상한 확인 (look01.md: 292에이전트 교훈)
+  - `LIMIT 100` 이미 존재. `MAX_HISTORY_TURNS` 상수로 추출하여 store-engine 연결
+  - `debug_assert` + 테스트로 windows 합 ≤ MAX_HISTORY_TURNS 강제
 
 - [x] **M-4** `ResourceKind::Execute` 변형 추가 (Shell/Git/Agent 분리)
   - **TDD**: `shell_requires_execute_permission()` 실패 테스트 먼저
