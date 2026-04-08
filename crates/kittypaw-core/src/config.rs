@@ -53,6 +53,9 @@ pub struct Config {
     /// Default profile name (used when no channel/session mapping matches).
     #[serde(default = "default_profile_name")]
     pub default_profile: String,
+    /// Reflection loop settings (daily pattern analysis + skill suggestion).
+    #[serde(default)]
+    pub reflection: ReflectionConfig,
 }
 
 fn default_profile_name() -> String {
@@ -135,6 +138,54 @@ impl Default for FeatureFlags {
             model_routing: false,
             background_agents: false,
             daily_token_limit: 0,
+        }
+    }
+}
+
+/// Reflection loop: daily analysis of user conversation patterns.
+///
+/// When enabled, a daily cron job analyzes recent conversations via LLM
+/// to detect repeated intents and suggest new skills.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionConfig {
+    /// Enable the reflection loop (default: true).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Cron expression for the reflection schedule (default: daily 3 AM).
+    #[serde(default = "default_reflection_cron")]
+    pub cron: String,
+    /// Maximum input characters for LLM analysis (default: 4000 ≈ 2000 tokens for Korean).
+    #[serde(default = "default_reflection_max_chars")]
+    pub max_input_chars: u32,
+    /// Minimum repeat count to trigger a suggestion (default: 3).
+    #[serde(default = "default_reflection_threshold")]
+    pub intent_threshold: u32,
+    /// Days before unused reflection data expires (default: 7).
+    #[serde(default = "default_reflection_ttl")]
+    pub ttl_days: u32,
+}
+
+fn default_reflection_cron() -> String {
+    "0 0 3 * * *".to_string()
+}
+fn default_reflection_max_chars() -> u32 {
+    4000
+}
+fn default_reflection_threshold() -> u32 {
+    3
+}
+fn default_reflection_ttl() -> u32 {
+    7
+}
+
+impl Default for ReflectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cron: default_reflection_cron(),
+            max_input_chars: default_reflection_max_chars(),
+            intent_threshold: default_reflection_threshold(),
+            ttl_days: default_reflection_ttl(),
         }
     }
 }
@@ -382,6 +433,7 @@ impl Default for Config {
             server: ServerConfig::default(),
             profiles: vec![],
             default_profile: default_profile_name(),
+            reflection: ReflectionConfig::default(),
         }
     }
 }
@@ -475,5 +527,56 @@ context_compaction = false
         assert!(!config.features.background_agents);
         // Explicitly set
         assert!(!config.features.context_compaction);
+    }
+
+    #[test]
+    fn test_reflection_config_defaults() {
+        let config = ReflectionConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.cron, "0 0 3 * * *");
+        assert_eq!(config.max_input_chars, 4000);
+        assert_eq!(config.intent_threshold, 3);
+        assert_eq!(config.ttl_days, 7);
+    }
+
+    #[test]
+    fn test_reflection_config_from_toml() {
+        let toml = r#"
+[llm]
+provider = "claude"
+api_key = "test-key"
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+
+[reflection]
+enabled = true
+intent_threshold = 5
+ttl_days = 14
+"#;
+        let config: Config = toml::from_str(toml).expect("should parse");
+        assert!(config.reflection.enabled);
+        assert_eq!(config.reflection.intent_threshold, 5);
+        assert_eq!(config.reflection.ttl_days, 14);
+        // Defaults for unspecified fields
+        assert_eq!(config.reflection.cron, "0 0 3 * * *");
+        assert_eq!(config.reflection.max_input_chars, 4000);
+    }
+
+    #[test]
+    fn test_reflection_config_missing_section() {
+        let toml = r#"
+[llm]
+provider = "claude"
+api_key = "test-key"
+
+[sandbox]
+timeout_secs = 30
+memory_limit_mb = 64
+"#;
+        let config: Config = toml::from_str(toml).expect("should parse");
+        assert!(config.reflection.enabled);
+        assert_eq!(config.reflection.intent_threshold, 3);
     }
 }

@@ -44,7 +44,17 @@ impl MemoryProvider for Store {
             lines.push(format!("## Remembered Facts\n{}", entries.join("\n")));
         }
 
-        // 2. Recent failures (last 24h) — gives LLM awareness of broken skills
+        // 2. Learned patterns from reflection (up to 5)
+        let reflection_intents = self.list_reflection_intents(5)?;
+        if !reflection_intents.is_empty() {
+            let entries: Vec<String> = reflection_intents
+                .iter()
+                .map(|(_k, v)| format!("- {v}"))
+                .collect();
+            lines.push(format!("## Learned Patterns\n{}", entries.join("\n")));
+        }
+
+        // 3. Recent failures (last 24h)
         let mut stmt = self.conn.prepare(
             "SELECT skill_name, result_summary, started_at FROM execution_history \
              WHERE success = 0 \
@@ -158,6 +168,88 @@ mod tests {
         let joined = lines.join("\n");
         assert!(joined.contains("Remembered Facts"));
         assert!(joined.contains("timezone"));
+
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn test_shared_context_excludes_reflection() {
+        let (store, p) = temp_store();
+        store.memory_save("timezone", "Asia/Seoul", "user").unwrap();
+        store
+            .memory_save("reflection:intent:abc123", "환율 조회", "reflection")
+            .unwrap();
+        store
+            .memory_save("rejected_intent:def456", "날씨", "reflection")
+            .unwrap();
+        store
+            .memory_save("suggest_candidate:xyz", "뉴스|3", "reflection")
+            .unwrap();
+
+        let shared = store.memory_recall("").unwrap();
+        let keys: Vec<&str> = shared.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains(&"timezone"));
+        assert!(!keys.iter().any(|k| k.starts_with("reflection:")));
+        assert!(!keys.iter().any(|k| k.starts_with("rejected_intent:")));
+        assert!(!keys.iter().any(|k| k.starts_with("suggest_candidate:")));
+
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn test_learned_patterns_section() {
+        let (store, p) = temp_store();
+        store
+            .memory_save("reflection:intent:abc", "환율 조회", "reflection")
+            .unwrap();
+        store
+            .memory_save("reflection:intent:def", "날씨 확인", "reflection")
+            .unwrap();
+
+        let lines = store.memory_context_lines().unwrap();
+        let joined = lines.join("\n");
+        assert!(
+            joined.contains("Learned Patterns"),
+            "should have Learned Patterns section"
+        );
+        assert!(joined.contains("환율 조회"));
+        assert!(joined.contains("날씨 확인"));
+
+        // Reflection keys should NOT appear in Remembered Facts
+        assert!(
+            !joined.contains("reflection:intent:"),
+            "raw keys should not leak"
+        );
+
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn test_delete_expired_reflection() {
+        let (store, p) = temp_store();
+        // Insert a reflection entry and manually backdate it
+        store
+            .memory_save("reflection:intent:old", "오래된 패턴", "reflection")
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE user_context SET updated_at = datetime('now', '-30 days') \
+             WHERE key = 'reflection:intent:old'",
+                [],
+            )
+            .unwrap();
+        // Insert a recent one
+        store
+            .memory_save("reflection:intent:new", "새 패턴", "reflection")
+            .unwrap();
+
+        let deleted = store.delete_expired_reflection(7).unwrap();
+        assert_eq!(deleted, 1, "should delete the old one");
+
+        let remaining = store.list_reflection_intents(10).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].1.contains("새 패턴"));
 
         let _ = std::fs::remove_file(&p);
     }

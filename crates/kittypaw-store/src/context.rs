@@ -39,7 +39,8 @@ impl Store {
     }
 
     /// List user context entries that are shareable across skills.
-    /// Excludes internal keys (default:*, suggest_*, schedule_*, onboarding*).
+    /// Excludes internal keys (default:*, suggest_*, schedule_*, onboarding*,
+    /// reflection:*, rejected_intent:*, suggest_candidate:*).
     pub fn list_shared_context(&self) -> Result<HashMap<String, String>> {
         let mut stmt = self.conn.prepare(
             "SELECT key, value FROM user_context \
@@ -47,7 +48,10 @@ impl Store {
                AND key NOT LIKE 'suggest_%' \
                AND key NOT LIKE 'schedule_%' \
                AND key NOT LIKE 'onboarding%' \
-               AND key NOT LIKE 'failure_hint:%'",
+               AND key NOT LIKE 'failure_hint:%' \
+               AND key NOT LIKE 'reflection:%' \
+               AND key NOT LIKE 'rejected_intent:%' \
+               AND key NOT LIKE 'suggest_candidate:%'",
         )?;
         let map: HashMap<String, String> = stmt
             .query_map([], |row| {
@@ -56,6 +60,51 @@ impl Store {
             .filter_map(|r| r.ok())
             .collect();
         Ok(map)
+    }
+
+    /// List reflection intent keys (for "Learned Patterns" prompt section).
+    /// Returns Vec<(key, value)> ordered by most recently updated, up to `limit`.
+    pub fn list_reflection_intents(&self, limit: usize) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM user_context \
+             WHERE key LIKE 'reflection:intent:%' \
+             ORDER BY updated_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Delete reflection data older than `ttl_days`.
+    /// Returns the number of rows deleted.
+    pub fn delete_expired_reflection(&self, ttl_days: u32) -> Result<usize> {
+        let offset = format!("-{ttl_days} days");
+        let deleted = self.conn.execute(
+            "DELETE FROM user_context \
+             WHERE key LIKE 'reflection:%' \
+               AND updated_at < datetime('now', ?1)",
+            params![offset],
+        )?;
+        Ok(deleted)
+    }
+
+    /// Delete a user context entry by key.
+    pub fn delete_user_context(&self, key: &str) -> Result<bool> {
+        let deleted = self
+            .conn
+            .execute("DELETE FROM user_context WHERE key = ?1", params![key])?;
+        Ok(deleted > 0)
+    }
+
+    /// Delete all user context entries matching a key prefix.
+    pub fn delete_user_context_prefix(&self, prefix: &str) -> Result<usize> {
+        let like_pattern = format!("{prefix}%");
+        let deleted = self.conn.execute(
+            "DELETE FROM user_context WHERE key LIKE ?1",
+            params![like_pattern],
+        )?;
+        Ok(deleted)
     }
 
     /// Set a user context value

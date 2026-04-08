@@ -133,4 +133,16 @@ impl NotificationSender {
             fix_id
         ));
     }
+
+    pub fn notify_reflection_suggestion(&self, intent_label: &str, count: u32, hash: &str) {
+        self.send(&format!(
+            "💡 *패턴 발견*: {label}을(를) 자주 하시네요 (최근 {count}회).\n\
+             매일 아침 자동으로 실행할까요?\n\
+             승인: `kittypaw reflection approve {hash}`\n\
+             거절: `kittypaw reflection reject {hash}`",
+            label = intent_label,
+            count = count,
+            hash = hash,
+        ));
+    }
 }

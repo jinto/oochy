@@ -898,3 +898,157 @@ async fn test_scheduled_skill_bare_http_no_trycatch() {
         resolved_exec.error, resolved_exec.output
     );
 }
+
+// ── Reflection tests ───────────────────────────────────────────────────
+
+/// Mock provider that returns a fixed JSON string (for reflection intent grouping).
+struct MockJsonProvider {
+    response: String,
+}
+
+impl MockJsonProvider {
+    fn new(json: &str) -> Self {
+        Self {
+            response: json.to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for MockJsonProvider {
+    async fn generate(&self, _messages: &[LlmMessage]) -> Result<LlmResponse> {
+        Ok(LlmResponse::text_only(self.response.clone()))
+    }
+}
+
+/// Reflection: 3 similar messages → suggestion created → reject → re-run filters it.
+#[tokio::test]
+async fn test_reflection_full_pipeline() {
+    let store = Store::open(":memory:").expect("in-memory store");
+
+    // Insert 3 user messages with current timestamps
+    store
+        .save_state(&kittypaw_core::types::AgentState::new("r1", "sys"))
+        .unwrap();
+    for msg in &["환율 알려줘", "달러 가격 얼마야", "환율 얼마야"] {
+        store
+            .add_turn(
+                "r1",
+                &kittypaw_core::types::ConversationTurn {
+                    role: kittypaw_core::types::Role::User,
+                    content: msg.to_string(),
+                    code: None,
+                    result: None,
+                    // Use far-future timestamp so it's always "within 24h" relative to now
+                    timestamp: "2099-01-01 00:00:00".to_string(),
+                },
+            )
+            .unwrap();
+    }
+
+    let mock = MockJsonProvider::new(
+        r#"{"groups":[{"intent_label":"환율 조회","messages":["환율 알려줘","달러 가격 얼마야","환율 얼마야"],"count":3}]}"#,
+    );
+
+    let config = kittypaw_core::config::ReflectionConfig {
+        enabled: true,
+        cron: "0 0 3 * * *".into(),
+        max_input_chars: 4000,
+        intent_threshold: 3,
+        ttl_days: 7,
+    };
+
+    // Run reflection
+    let result = kittypaw_engine::reflection::run_reflection(&store, &mock, &config)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.suggestions.len(),
+        1,
+        "should detect 1 repeated intent"
+    );
+    assert!(result.suggestions[0].intent_label.contains("환율"));
+    let hash = result.suggestions[0].intent_hash.clone();
+
+    // Verify suggest_candidate was stored
+    let candidate = store
+        .get_user_context(&format!("suggest_candidate:{hash}"))
+        .unwrap();
+    assert!(candidate.is_some(), "candidate should be in user_context");
+    assert!(
+        candidate.unwrap().contains("환율 조회"),
+        "candidate value should contain intent label"
+    );
+
+    // Verify reflection:intent was stored (for Learned Patterns)
+    let intent = store
+        .get_user_context(&format!("reflection:intent:{hash}"))
+        .unwrap();
+    assert!(intent.is_some(), "reflection intent should be stored");
+
+    // Re-run: should NOT create duplicate suggestion
+    let result2 = kittypaw_engine::reflection::run_reflection(&store, &mock, &config)
+        .await
+        .unwrap();
+    assert_eq!(
+        result2.suggestions.len(),
+        0,
+        "should skip already-suggested intent"
+    );
+
+    // Reject the suggestion
+    store
+        .set_user_context(&format!("rejected_intent:{hash}"), "환율 조회", "user")
+        .unwrap();
+    // Clear the candidate (simulating CLI reject)
+    store
+        .set_user_context(&format!("suggest_candidate:{hash}"), "", "rejected")
+        .unwrap();
+
+    // Re-run with a new mock that still returns the same group
+    let mock3 = MockJsonProvider::new(
+        r#"{"groups":[{"intent_label":"환율 조회","messages":["환율"],"count":3}]}"#,
+    );
+    let result3 = kittypaw_engine::reflection::run_reflection(&store, &mock3, &config)
+        .await
+        .unwrap();
+    assert_eq!(
+        result3.suggestions.len(),
+        0,
+        "rejected intent should never be suggested again"
+    );
+}
+
+/// Reflection: memory_context_lines includes Learned Patterns section.
+#[tokio::test]
+async fn test_reflection_learned_patterns_in_context() {
+    use kittypaw_core::memory::MemoryProvider;
+
+    let store = Store::open(":memory:").expect("in-memory store");
+
+    // Store a reflection intent
+    store
+        .set_user_context("reflection:intent:abc123", "환율 조회", "reflection")
+        .unwrap();
+
+    let lines = store.memory_context_lines().unwrap();
+    let joined = lines.join("\n");
+
+    assert!(
+        joined.contains("Learned Patterns"),
+        "should have Learned Patterns section"
+    );
+    assert!(
+        joined.contains("환율 조회"),
+        "should contain the intent label"
+    );
+
+    // reflection keys should NOT appear in Remembered Facts
+    if joined.contains("Remembered Facts") {
+        assert!(
+            !joined.contains("reflection:intent:"),
+            "raw reflection keys should not leak into Remembered Facts"
+        );
+    }
+}

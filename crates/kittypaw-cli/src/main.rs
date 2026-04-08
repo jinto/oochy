@@ -90,6 +90,11 @@ enum Commands {
         #[command(subcommand)]
         command: FixesCommands,
     },
+    /// View and manage reflection patterns and suggestions
+    Reflection {
+        #[command(subcommand)]
+        command: ReflectionCommands,
+    },
     /// Simulate a telegram/channel event through the full agent pipeline (for debugging)
     TestEvent {
         /// Message text to send
@@ -174,6 +179,26 @@ enum FixesCommands {
         /// Fix ID
         fix_id: i64,
     },
+}
+
+#[derive(Subcommand)]
+enum ReflectionCommands {
+    /// List pending suggestions and learned patterns
+    List,
+    /// Approve a suggestion (creates a scheduled skill)
+    Approve {
+        /// Intent hash (shown in list output)
+        hash: String,
+    },
+    /// Reject a suggestion (never suggest again)
+    Reject {
+        /// Intent hash (shown in list output)
+        hash: String,
+    },
+    /// Clear all reflection data
+    Clear,
+    /// Manually run one reflection cycle (for debugging / E2E testing)
+    Run,
 }
 
 #[derive(Subcommand)]
@@ -322,6 +347,17 @@ async fn main() {
             }
             FixesCommands::Show { fix_id } => commands::fixes::run_fixes_show(fix_id),
             FixesCommands::Approve { fix_id } => commands::fixes::run_fixes_approve(fix_id),
+        },
+        Some(Commands::Reflection { command }) => match command {
+            ReflectionCommands::List => commands::reflection::run_reflection_list(),
+            ReflectionCommands::Approve { hash } => {
+                commands::reflection::run_reflection_approve(&hash).await
+            }
+            ReflectionCommands::Reject { hash } => {
+                commands::reflection::run_reflection_reject(&hash)
+            }
+            ReflectionCommands::Clear => commands::reflection::run_reflection_clear(),
+            ReflectionCommands::Run => commands::reflection::run_reflection_now().await,
         },
         Some(Commands::TestEvent {
             message,

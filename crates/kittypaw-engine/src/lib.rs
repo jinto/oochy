@@ -2,6 +2,7 @@ pub mod agent_loop;
 pub mod assistant;
 pub mod compaction;
 pub mod mcp_registry;
+pub mod reflection;
 pub mod schedule;
 pub mod security;
 pub mod skill_executor;

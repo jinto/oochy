@@ -149,7 +149,25 @@
 
 ---
 
-## KakaoTalk 채널 (Open Builder + CF Worker Relay) ← 현재
+## Wow #2: 학습하는 엔진 (Adaptive Engine) ← 현재
+
+Spec: `.ina/specs/20260409-think-adaptive-engine.md`
+Plan: `.claude/plans/adaptive-engine.md`
+
+### Plan 1: Store + Config 기반 ✅
+- [x] ReflectionConfig 추가 + recent_user_messages 쿼리
+- [x] reflection:* 키 격리 + "Learned Patterns" 섹션
+
+### Plan 2: Reflection Loop 핵심 ✅
+- [x] reflection.rs — LLM intent grouping + suggestion 생성
+- [x] schedule/mod.rs — reflection tick 통합
+
+### Plan 3: CLI + 승인 흐름 ✅
+- [x] kittypaw reflection list/approve/reject/clear CLI
+
+---
+
+## KakaoTalk 채널 (Open Builder + CF Worker Relay) ✅
 
 > 스펙: `.ina/specs/20260409-0220-think-kakao-channel.md`
 > 플랜: `.claude/plans/kakao-channel-open-builder-relay.md`

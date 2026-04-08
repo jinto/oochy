@@ -91,6 +91,45 @@ impl Store {
         Ok(turns)
     }
 
+    /// Retrieve user messages from all agents within the last `hours`,
+    /// up to `max_chars` total characters. Most recent messages first,
+    /// then reversed to chronological order.
+    pub fn recent_user_messages_all(&self, hours: u32, max_chars: u32) -> Result<Vec<String>> {
+        // Handle both ISO ("2026-04-08 19:00:00") and Unix epoch ("1775676713") timestamps.
+        // CAST as INTEGER works for epoch; datetime() works for ISO. Use id-based fallback.
+        let cutoff_epoch = (chrono::Utc::now() - chrono::Duration::hours(hours as i64))
+            .timestamp()
+            .to_string();
+        let cutoff_iso = (chrono::Utc::now() - chrono::Duration::hours(hours as i64))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        let mut stmt = self.conn.prepare(
+            "SELECT content FROM conversations \
+             WHERE role = 'user' \
+               AND (CAST(timestamp AS INTEGER) > CAST(?1 AS INTEGER) \
+                    OR timestamp > ?2) \
+             ORDER BY id DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![cutoff_epoch, cutoff_iso], |row| {
+                row.get::<_, String>(0)
+            })?
+            .filter_map(|r| r.ok());
+
+        let mut messages = Vec::new();
+        let mut total_chars: u32 = 0;
+        for msg in rows {
+            let len = msg.len() as u32;
+            if total_chars + len > max_chars {
+                break;
+            }
+            total_chars += len;
+            messages.push(msg);
+        }
+        messages.reverse(); // chronological order
+        Ok(messages)
+    }
+
     pub(crate) fn recent_turns_all(&self, agent_id: &str) -> Result<Vec<ConversationTurn>> {
         let limit = kittypaw_core::types::MAX_HISTORY_TURNS as i64;
         let mut stmt = self.conn.prepare(

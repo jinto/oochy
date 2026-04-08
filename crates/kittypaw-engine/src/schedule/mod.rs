@@ -118,6 +118,22 @@ pub async fn run_schedule_loop(
             }
         }
 
+        // --- Reflection tick ---
+        if config.reflection.enabled
+            && config.autonomy_level != kittypaw_core::config::AutonomyLevel::Readonly
+        {
+            let last_reflection = {
+                let s = store.lock().await;
+                s.get_last_run("_reflection_")
+            };
+            if cron::is_cron_due(&config.reflection.cron, last_reflection) {
+                tracing::info!("Reflection cron due — running analysis");
+                run_reflection_tick(config, &store, &notifier).await;
+                let s = store.lock().await;
+                let _ = s.set_last_run("_reflection_", chrono::Utc::now());
+            }
+        }
+
         // --- Run scheduled packages ---
         if !pkg_contexts.is_empty() {
             let packages_dir = data_dir.join("packages");
@@ -141,6 +157,98 @@ pub async fn run_schedule_loop(
                 .await;
             }
         }
+    }
+}
+
+/// Execute one reflection tick using the shared store.
+/// Structured as lock→read→unlock→await→lock→write→unlock to keep Store !Send-safe.
+async fn run_reflection_tick(
+    config: &kittypaw_core::config::Config,
+    store: &std::sync::Arc<tokio::sync::Mutex<kittypaw_store::Store>>,
+    notifier: &NotificationSender,
+) {
+    // Build LLM provider (same pattern as auto_fix)
+    let registry = if !config.models.is_empty() {
+        let mut models = config.models.clone();
+        if !config.llm.api_key.is_empty() {
+            for model in &mut models {
+                if model.api_key.is_empty()
+                    && matches!(model.provider.as_str(), "claude" | "anthropic" | "openai")
+                {
+                    model.api_key = config.llm.api_key.clone();
+                }
+            }
+        }
+        kittypaw_llm::registry::LlmRegistry::from_configs(&models)
+    } else if !config.llm.api_key.is_empty() {
+        let legacy = kittypaw_core::config::ModelConfig {
+            name: config.llm.provider.clone(),
+            provider: config.llm.provider.clone(),
+            model: config.llm.model.clone(),
+            api_key: config.llm.api_key.clone(),
+            max_tokens: config.llm.max_tokens,
+            default: true,
+            base_url: None,
+            context_window: None,
+        };
+        kittypaw_llm::registry::LlmRegistry::from_configs(&[legacy])
+    } else {
+        tracing::warn!("Reflection: no LLM provider configured");
+        return;
+    };
+    let provider = match registry.default_provider() {
+        Some(p) => p,
+        None => {
+            tracing::warn!("Reflection: no default provider");
+            return;
+        }
+    };
+
+    // Phase 1: Read (lock → read → unlock)
+    let input = {
+        let s = store.lock().await;
+        match crate::reflection::read_reflection_input(&*s, &config.reflection) {
+            Ok(i) => i,
+            Err(e) => {
+                tracing::error!("Reflection read failed: {e}");
+                return;
+            }
+        }
+    };
+
+    if input.messages.is_empty() {
+        let s = store.lock().await;
+        let _ = s.delete_expired_reflection(config.reflection.ttl_days);
+        return;
+    }
+
+    // Phase 2: LLM call (no lock held)
+    let groups =
+        match crate::reflection::call_llm_grouping(&*provider, &input, &config.reflection).await {
+            Ok(g) => g,
+            Err(e) => {
+                tracing::error!("Reflection LLM failed: {e}");
+                return;
+            }
+        };
+
+    // Phase 3: Write (lock → write → unlock)
+    let s = store.lock().await;
+    match crate::reflection::write_reflection_results(&*s, groups, &input, &config.reflection) {
+        Ok(result) => {
+            for sg in &result.suggestions {
+                tracing::info!(
+                    "Reflection: suggested '{}' ({}x)",
+                    sg.intent_label,
+                    sg.count
+                );
+                notifier.notify_reflection_suggestion(&sg.intent_label, sg.count, &sg.intent_hash);
+            }
+            if result.swept > 0 {
+                tracing::info!("Reflection: swept {} expired entries", result.swept);
+            }
+        }
+        Err(e) => tracing::error!("Reflection write failed: {e}"),
     }
 }
 

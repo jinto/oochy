@@ -640,16 +640,55 @@ mod tests {
         let path = temp_db_path();
         let store = Store::open(path.to_str().unwrap()).unwrap();
 
-        // Before grant: not allowed
         assert!(!store.has_capability_grant("http").unwrap());
-
-        // After onboarding grant
         store.grant_capability("http").unwrap();
         assert!(store.has_capability_grant("http").unwrap());
-
-        // Revoke works too
         store.revoke_capability("http").unwrap();
         assert!(!store.has_capability_grant("http").unwrap());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_recent_user_messages_all() {
+        let path = temp_db_path();
+        let store = Store::open(path.to_str().unwrap()).unwrap();
+
+        store.save_state(&AgentState::new("a1", "sys")).unwrap();
+        store.save_state(&AgentState::new("a2", "sys")).unwrap();
+
+        store
+            .conn
+            .execute(
+                "INSERT INTO conversations (agent_id, role, content, timestamp) \
+                 VALUES ('a1', 'user', '환율 알려줘', datetime('now'))",
+                [],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO conversations (agent_id, role, content, timestamp) \
+                 VALUES ('a1', 'assistant', '1350원입니다', datetime('now'))",
+                [],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO conversations (agent_id, role, content, timestamp) \
+                 VALUES ('a2', 'user', '달러 가격', datetime('now'))",
+                [],
+            )
+            .unwrap();
+
+        let msgs = store.recent_user_messages_all(24, 10000).unwrap();
+        assert_eq!(msgs.len(), 2, "only user messages, across agents");
+        assert!(msgs[0].contains("환율"));
+        assert!(msgs[1].contains("달러"));
+
+        let msgs = store.recent_user_messages_all(24, 14).unwrap();
+        assert_eq!(msgs.len(), 1, "should cap at max_chars");
 
         let _ = std::fs::remove_file(&path);
     }
