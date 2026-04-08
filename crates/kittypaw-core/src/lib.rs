@@ -1,3 +1,4 @@
+pub mod app_paths;
 pub mod capability;
 pub mod config;
 pub mod credential;

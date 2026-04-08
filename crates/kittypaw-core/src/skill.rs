@@ -66,9 +66,11 @@ fn sanitize_name(name: &str) -> std::result::Result<String, KittypawError> {
     Ok(sanitized)
 }
 
-/// Returns the `.kittypaw/skills/` directory path, creating it if needed.
+/// Returns the skills directory path, creating it if needed.
+///
+/// Resolved via `AppPaths::from_data_dir()` (honours `KITTYPAW_HOME`).
 pub fn skills_dir() -> PathBuf {
-    let dir = PathBuf::from(".kittypaw/skills");
+    let dir = crate::app_paths::AppPaths::from_data_dir().skills_dir();
     if !dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&dir) {
             tracing::warn!("Failed to create skills directory {}: {e}", dir.display());

@@ -55,7 +55,7 @@ pub async fn run_schedule_loop(
             }
 
             // Pre-compute package contexts while we have the store
-            let packages_dir = std::path::PathBuf::from(".kittypaw/packages");
+            let packages_dir = data_dir.join("packages");
             let shared_ctx = store.list_shared_context().unwrap_or_default();
             let pkg_contexts: Vec<_> = if let Ok(packages) =
                 kittypaw_core::package_manager::load_all_packages(&packages_dir)
@@ -102,7 +102,7 @@ pub async fn run_schedule_loop(
 
         // --- Run scheduled packages ---
         if !pkg_contexts.is_empty() {
-            let packages_dir = std::path::PathBuf::from(".kittypaw/packages");
+            let packages_dir = data_dir.join("packages");
             let pkg_mgr = kittypaw_core::package_manager::PackageManager::new(packages_dir);
             for (pkg, js_code, context, config_values, input_params) in &pkg_contexts {
                 tracing::info!("Running scheduled package: {}", pkg.meta.id);

@@ -41,7 +41,7 @@
   - **TDD**: `schedule_loop_preserves_rate_limit()` 실패 테스트 먼저
   - 스케줄 루프 수명 동안 checker 인스턴스 유지
 
-- [ ] **M-2** `AppPaths` 구조체로 CWD 하드코딩 제거
+- [x] **M-2** `AppPaths` 구조체로 CWD 하드코딩 제거
   - **TDD**: `app_paths_derived_from_config()` 실패 테스트 먼저
   - `schedule/mod.rs:58`, `skill.rs:71`: `.kittypaw/*` 경로를 config에서 파생
 
