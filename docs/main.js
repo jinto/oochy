@@ -22,3 +22,8 @@
     observer.observe(el);
   });
 })();
+
+/* Obfuscate — assemble split data attributes for bot protection */
+document.querySelectorAll('.obf-p,.obf-a,.obf-b').forEach(function (el) {
+  el.textContent = (el.dataset.a || '') + (el.dataset.b || '') + (el.dataset.c || '');
+});

@@ -870,6 +870,17 @@ footer {
 }
 .footer-links a:hover { color: var(--blue-400); text-decoration: none; }
 .footer-sep { color: var(--slate-700); }
+.biz-info {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--slate-400);
+}
+.biz-sep { color: var(--slate-600); }
 
 /* ============================================================
    HERO H1 SUB (quote line)
