@@ -215,6 +215,7 @@ async fn run_reflection_tick(
             default: true,
             base_url: None,
             context_window: None,
+            tier: None,
         };
         kittypaw_llm::registry::LlmRegistry::from_configs(&[legacy])
     } else {

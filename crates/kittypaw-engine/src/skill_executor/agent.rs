@@ -51,6 +51,7 @@ pub(super) async fn execute_agent(
                     default: true,
                     base_url: None,
                     context_window: None,
+                    tier: None,
                 };
                 kittypaw_llm::registry::LlmRegistry::from_configs(&[legacy])
             } else {

@@ -43,6 +43,7 @@ pub(crate) fn build_registry(config: &Config) -> LlmRegistry {
             default: true,
             base_url: None,
             context_window: None,
+            tier: None,
         };
         LlmRegistry::from_configs(&[legacy])
     } else {

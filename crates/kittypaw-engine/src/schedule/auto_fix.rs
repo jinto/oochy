@@ -49,6 +49,7 @@ pub async fn attempt_auto_fix(
             default: true,
             base_url: None,
             context_window: None,
+            tier: None,
         };
         kittypaw_llm::registry::LlmRegistry::from_configs(&[legacy])
     } else {

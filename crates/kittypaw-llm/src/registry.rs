@@ -330,6 +330,7 @@ mod tests {
             default: false,
             base_url: None,
             context_window: None,
+            tier: None,
         }];
         let registry = LlmRegistry::from_configs(&configs);
         assert!(registry.list().is_empty());
@@ -346,6 +347,7 @@ mod tests {
             default: true,
             base_url: None,
             context_window: None,
+            tier: None,
         }];
         let registry = LlmRegistry::from_configs(&configs);
         assert_eq!(registry.list().len(), 1);
@@ -396,6 +398,7 @@ mod tests {
             default: true,
             base_url: None,
             context_window: Some(32768),
+            tier: None,
         }];
         let registry = LlmRegistry::from_configs(&configs);
         let provider = registry.default_provider().unwrap();
@@ -432,6 +435,7 @@ mod tests {
             default: true,
             base_url: None,
             context_window: None,
+            tier: None,
         }];
         let registry = LlmRegistry::from_configs(&configs);
         let provider = registry.default_provider().unwrap();

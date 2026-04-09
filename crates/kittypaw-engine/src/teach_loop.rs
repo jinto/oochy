@@ -43,17 +43,17 @@ const AUTOMATION_KEYWORDS: &[&str] = &[
     "alert",
 ];
 
-/// Classify skill intent: Analysis keywords win on conflict (upward bias).
+/// Classify skill intent: Automation/scheduling intent wins on conflict.
 /// Default is Analysis for unknown inputs.
 pub fn classify_tier(text: &str) -> ModelTier {
     let lower = text.to_lowercase();
-    if ANALYSIS_KEYWORDS.iter().any(|k| lower.contains(k)) {
-        tracing::debug!("classify_tier: {:?} → Analysis", text);
-        return ModelTier::Analysis;
-    }
     if AUTOMATION_KEYWORDS.iter().any(|k| lower.contains(k)) {
         tracing::debug!("classify_tier: {:?} → Automation", text);
         return ModelTier::Automation;
+    }
+    if ANALYSIS_KEYWORDS.iter().any(|k| lower.contains(k)) {
+        tracing::debug!("classify_tier: {:?} → Analysis", text);
+        return ModelTier::Analysis;
     }
     tracing::debug!("classify_tier: {:?} → Analysis (default)", text);
     ModelTier::Analysis
@@ -72,6 +72,18 @@ pub fn tier_model_name(tier: Option<ModelTier>, config: &Config) -> Option<Strin
     match tier.unwrap_or_default() {
         ModelTier::Analysis => None,
         ModelTier::Automation => {
+            use kittypaw_core::config::ModelRoutingTier;
+
+            // Priority 1: model explicitly tagged tier = "automation"
+            if let Some(m) = config
+                .models
+                .iter()
+                .find(|m| m.tier == Some(ModelRoutingTier::Automation))
+            {
+                return Some(m.name.clone());
+            }
+
+            // Priority 2: first non-default model (backwards-compat fallback)
             let default_name = config
                 .models
                 .iter()
@@ -599,10 +611,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_tier_analysis_keyword_wins() {
+    fn classify_tier_automation_wins_on_conflict_with_analysis() {
         use kittypaw_core::skill::ModelTier;
-        // 요약 키워드 → Analysis
-        assert_eq!(classify_tier("뉴스 요약해서 보내줘"), ModelTier::Analysis);
+        // "보내줘" (Automation) wins over "요약" (Analysis)
+        assert_eq!(classify_tier("뉴스 요약해서 보내줘"), ModelTier::Automation);
     }
 
     #[test]
@@ -615,10 +627,10 @@ mod tests {
     }
 
     #[test]
-    fn classify_tier_conflict_analysis_wins() {
+    fn classify_tier_automation_wins_when_both_keywords_present() {
         use kittypaw_core::skill::ModelTier;
-        // 분석 + 보내줘 → Analysis 우선
-        assert_eq!(classify_tier("분석해서 보내줘"), ModelTier::Analysis);
+        // "보내줘" (Automation) wins over "분석" (Analysis)
+        assert_eq!(classify_tier("분석해서 보내줘"), ModelTier::Automation);
     }
 
     #[test]
@@ -628,17 +640,31 @@ mod tests {
     }
 
     #[test]
-    fn classify_tier_mixed_language_analysis_wins() {
+    fn classify_tier_automation_wins_mixed_language() {
         use kittypaw_core::skill::ModelTier;
-        // "every day" + "요약" → Analysis 우선
-        assert_eq!(classify_tier("every day 요약"), ModelTier::Analysis);
+        // "every" (Automation) wins over "요약" (Analysis)
+        assert_eq!(classify_tier("every day 요약"), ModelTier::Automation);
     }
 
     #[test]
-    fn classify_tier_mixed_conflict_analysis_wins() {
+    fn classify_tier_automation_wins_english_conflict() {
         use kittypaw_core::skill::ModelTier;
-        // "analyze" + "보내줘" → Analysis 우선
-        assert_eq!(classify_tier("analyze and 보내줘"), ModelTier::Analysis);
+        // "보내줘" (Automation) wins over "analyze" (Analysis)
+        assert_eq!(classify_tier("analyze and 보내줘"), ModelTier::Automation);
+    }
+
+    #[test]
+    fn classify_tier_daily_report_send_is_automation() {
+        use kittypaw_core::skill::ModelTier;
+        // motivating example: "매일" triggers Automation first
+        assert_eq!(classify_tier("매일 리포트 보내줘"), ModelTier::Automation);
+    }
+
+    #[test]
+    fn classify_tier_report_only_is_analysis() {
+        use kittypaw_core::skill::ModelTier;
+        // no scheduling keyword → Analysis
+        assert_eq!(classify_tier("리포트 분석해줘"), ModelTier::Analysis);
     }
 
     fn two_model_config(routing: bool) -> Config {
@@ -654,6 +680,7 @@ mod tests {
                     default: true,
                     base_url: None,
                     context_window: None,
+                    tier: None,
                 },
                 ModelConfig {
                     name: "fast-model".into(),
@@ -664,6 +691,7 @@ mod tests {
                     default: false,
                     base_url: None,
                     context_window: None,
+                    tier: None,
                 },
             ],
             features: FeatureFlags {
@@ -712,6 +740,7 @@ mod tests {
                 default: true,
                 base_url: None,
                 context_window: None,
+                tier: None,
             }],
             features: FeatureFlags {
                 model_routing: true,
@@ -720,5 +749,58 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(tier_model_name(Some(ModelTier::Automation), &config), None);
+    }
+
+    #[test]
+    fn tier_model_name_explicit_automation_tier_wins_over_insertion_order() {
+        use kittypaw_core::config::{FeatureFlags, ModelConfig, ModelRoutingTier};
+        use kittypaw_core::skill::ModelTier;
+        // Bug scenario: wrong-model is listed first (non-default), fast-model has explicit tier
+        let config = Config {
+            models: vec![
+                ModelConfig {
+                    name: "wrong-model".into(), // old code would pick this
+                    provider: "openai".into(),
+                    model: "gpt-4o".into(),
+                    api_key: "key".into(),
+                    max_tokens: 1000,
+                    default: false,
+                    base_url: None,
+                    context_window: None,
+                    tier: None,
+                },
+                ModelConfig {
+                    name: "default-model".into(),
+                    provider: "openai".into(),
+                    model: "gpt-4".into(),
+                    api_key: "key".into(),
+                    max_tokens: 1000,
+                    default: true,
+                    base_url: None,
+                    context_window: None,
+                    tier: None,
+                },
+                ModelConfig {
+                    name: "fast-model".into(),
+                    provider: "openai".into(),
+                    model: "gpt-3.5-turbo".into(),
+                    api_key: "key".into(),
+                    max_tokens: 1000,
+                    default: false,
+                    base_url: None,
+                    context_window: None,
+                    tier: Some(ModelRoutingTier::Automation),
+                },
+            ],
+            features: FeatureFlags {
+                model_routing: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            tier_model_name(Some(ModelTier::Automation), &config),
+            Some("fast-model".to_string())
+        );
     }
 }

@@ -212,6 +212,15 @@ fn default_max_tokens() -> u32 {
     4096
 }
 
+/// Explicit routing tier for a model entry in `[[models]]`.
+/// When set to `automation`, this model is preferred for Automation-tier tasks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelRoutingTier {
+    Automation,
+    Analysis,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub name: String,
@@ -228,6 +237,10 @@ pub struct ModelConfig {
     /// Override the provider's auto-detected context window (in tokens).
     #[serde(default)]
     pub context_window: Option<u32>,
+    /// Explicit routing tier. When `Some(Automation)`, preferred for Automation tasks.
+    /// Absent = legacy fallback behaviour (first non-default model).
+    #[serde(default)]
+    pub tier: Option<ModelRoutingTier>,
 }
 
 fn default_stt_language() -> String {
